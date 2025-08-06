@@ -1,0 +1,739 @@
+---
+title: "Metabolomics preprocessing"
+author: "Petra Polakovicova"
+format: html
+editor: visual
+---
+
+This script serves for preprocessing the metabolomics data. Here, we have two datasets derived from the same samples. One dataset is a result of LC-MS approach, the other is obtained by NMR.
+
+How will the analysis be addressed:
+
+**Preprocessing per Platform**
+
+Treating the NMR and LC-MS results as two separate datasets at first. Normalize and QC them separately:
+
+-   NMR → log-transform if needed, auto-scale.
+-   LC-MS → batch correction (ComBat), impute missing values, scaling.
+
+**Data Integration Options**
+
+*Option A: Integrate After Feature Extraction* Summarize both NMR and LC-MS to biological pathways (using e.g. Mummichog, MetaboAnalyst, MS Peaks to Pathways). Pros: Easier, avoids platform bias. C ons: Loses fine-grained info.
+
+*Option B: Integrate Full Features* Keep both NMR and LC-MS features, concatenate after scaling. Use MOFA2 or DIABLO (from mixOmics) — these tools are designed for multi-omics from heterogeneous platforms. This is the modern state-of-the-art for such cases. Pros: Keeps full richness of data. Cons: Requires careful handling of batch/variance scaling.
+
+MOFA2: https://biofam.github.io/MOFA2/ DIABLO: https://mixomics.org/mixdiablo/
+
+```{r}
+library(sva)
+library(mixOmics)
+library(mice)
+library(openxlsx)
+library(ggplot2)
+library(reshape2)
+library(DataExplorer)
+library(dplyr)
+library(mice)
+library(MOFA2)
+library(patchwork)
+library(ggvenn)
+library(tidyverse)
+library(ggpubr)
+```
+
+# Preprocessing
+
+## Listing identified metabolites
+
+**LCMS**
+
+```{r}
+lc_ms_df <- read.xlsx("../../../Data/raw/metabolomics/edited/VeganScreener_lcms_edited.xlsx")
+
+metabolites_names_lcms <- read.xlsx("../../../Data/raw/metabolomics/edited/VeganScreener_lcms_edited.xlsx",sheet="metab")
+
+metabolites_lcms <- metabolites_names_lcms$ident
+```
+
+**NMR**
+
+```{r}
+nmr_df <- read.xlsx("../../../Data/raw/metabolomics/NMR_metabolome_VGScreener.xlsx")
+
+metabolites_nmr <- nmr_df[1,4:30]
+nmr_df <- nmr_df[-c(1,2),]
+
+samplenames <- nmr_df[,1]
+rownames(nmr_df) <- samplenames
+
+nmr_df <- nmr_df[,-c(1,2,3)]
+colnames(nmr_df) <- metabolites_nmr
+
+nmr_df <- as.data.frame(apply(nmr_df,2,function(x) as.numeric(x))) %>%
+  `row.names<-`(samplenames)
+
+metabolites_nmr <- as.character(metabolites_nmr)
+```
+
+**Comparison**
+
+```{r}
+list_core <- list()
+list_core[["NMR"]] <- metabolites_nmr
+list_core[["LCMS"]] <- metabolites_lcms
+
+venn <- ggvenn(list_core, fill_color = c("blue", "red")) + 
+    ggtitle("NMR vs LCMS") + 
+    guides(fill = "none")
+
+venn
+```
+
+## LC-MS
+
+```{r}
+lc_ms_df <- read.xlsx("../../../Data/raw/metabolomics/edited/VeganScreener_lcms_edited.xlsx")
+
+metabolites_names <- read.xlsx("../../../Data/raw/metabolomics/edited/VeganScreener_lcms_edited.xlsx",sheet="metab")
+
+all(colnames(lc_ms_df)[-1] == metabolites_names$`m/z`)
+
+metabolites_names$Metabolite <- metabolites_names$ident
+
+colnames(lc_ms_df) <- c("study_id",metabolites_names$Metabolite)
+
+lc_ms_df <- lc_ms_df %>% 
+  column_to_rownames("study_id") %>%
+  t() %>% as.data.frame() %>%
+  rownames_to_column("Metabolite")
+
+rownames(lc_ms_df) <- NULL
+
+write.table(metabolites_names,"../../../Data/preprocessed/metabolomics/lcms_metabolites_identification.tsv",sep="\t")
+
+```
+
+### Missing value test
+
+We miss 0.02% of data. 
+
+```{r}
+df_for_test <- lc_ms_df
+df_for_test[df_for_test==0] <- NA
+df_for_test[df_for_test==""] <- NA
+
+100*sum(is.na(df_for_test))/(50*499)
+```
+
+### Removing NaNs
+
+Removing metabolites when we have 20% missing. All metaboolites preserved. 
+
+```{r}
+data_clean <- df_for_test %>%
+  rowwise() %>%
+  filter(mean(is.na(c_across(-Metabolite))) < 0.2) %>%
+  ungroup()
+```
+
+### Imputation
+
+```{r}
+data_clean[data_clean==0] <- NA
+
+imputed_data <- mice(as.data.frame(t(data_clean[,-1])), 
+                     m = 5, method = 'pmm', seed = 123)
+
+completed_data <- complete(imputed_data, 1)
+
+colnames(completed_data) <- data_clean$Metabolite
+
+which(is.na(completed_data), arr.ind = TRUE)
+100*sum(is.na(completed_data))/(50*499)
+```
+
+We successfully imputed the 0.2% of data.
+
+**Comparison**
+
+To check the quality of imputation, we will plot the imputed values.
+
+```{r}
+data_clean <- data_clean %>% 
+  column_to_rownames("Metabolite") %>%  
+  t() %>% as.data.frame()
+
+nans <- which(is.na(data_clean), arr.ind = TRUE)
+
+plot_df <- as.data.frame(completed_data[,unique(nans[,2])])
+plot_df$imputed <- "NO"
+plot_df$imputed[unique(nans[,1])] <- "YES"
+colnames(plot_df) <- c("value","imputed")
+
+p <- ggplot(plot_df) + 
+  geom_jitter(aes(x="",y=value,color=imputed))
+
+p
+```
+
+The imputation looks fine, now lets see if the imputation did not disturb the overall composition using PCA.
+
+```{r}
+data_before <- data_clean
+data_before[is.na(data_before)] <- 0
+
+pca_before <- as.data.frame(
+  prcomp(data_before,center = TRUE,scale=TRUE)$x 
+)
+pca_before$imputed_sample <- "NO"
+pca_before$imputed_sample[unique(nans[,1])] <- "YES"
+
+p_before <- ggplot(pca_before) + 
+     geom_point(aes(x=PC1,y=PC2,color=imputed_sample)) + 
+     theme_minimal() + 
+     theme(panel.border = element_rect(color = "black", 
+                                       fill = NA, size = 0),
+           axis.ticks.x = element_line(size=0.3,color = "black"),
+           axis.ticks.y = element_line(size=0.3,color="black"),
+          axis.ticks.length = unit(4,"pt"),
+           axis.text = element_text(face = "bold",colour = "black"),
+           axis.title = element_text(face = "bold",colour = "black"),
+           panel.grid = element_blank()) + 
+     theme(legend.position = "right") 
+
+```
+
+```{r}
+pca_after <- as.data.frame(
+  prcomp(completed_data,center = TRUE,scale=TRUE)$x
+)
+pca_after$imputed_sample <- "NO"
+pca_after$imputed_sample[unique(nans[,1])] <- "YES"
+
+p_after <- ggplot(pca_after) + 
+     geom_point(aes(x=PC1,y=PC2,color=imputed_sample)) + 
+     theme_minimal() + 
+     theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
+           axis.ticks.x = element_line(size=0.3,color = "black"),
+           axis.ticks.y = element_line(size=0.3,color="black"),
+          axis.ticks.length = unit(4,"pt"),
+           axis.text = element_text(face = "bold",colour = "black"),
+           axis.title = element_text(face = "bold",colour = "black"),
+           panel.grid = element_blank()) + 
+     theme(legend.position = "right") 
+```
+
+Looks fine. 
+
+```{r}
+wrap_plots(p_before,p_after,guides = "collect")
+```
+
+### Non-tranformed plots 
+
+**Boxplots and density**
+
+```{r}
+metadata_df <- read.table("../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
+```
+
+```{r}
+plot_list_boxplots <- list()
+plot_list_density <- list()
+
+plot_df <- merge(completed_data %>% rownames_to_column("study_id"),
+                 metadata_df %>% dplyr::select("study_id","eq_included_group"),all=TRUE) %>%
+  drop_na()
+
+for (column in colnames(completed_data)){
+  # boxplot
+    p <- ggplot(plot_df) + 
+      geom_boxplot(aes(x="",y=!!sym(column)),outliers = FALSE) +
+    geom_jitter(height=0, width=0.3,
+                aes(x="",y=!!sym(column),color=eq_included_group)) + 
+    scale_color_manual(values=c("brown","darkgreen")) + 
+      theme(legend.position = "right")
+    
+    plot_list_boxplots[[length(plot_list_boxplots)+1]] <- p
+    
+    pd <- ggplot(plot_df) + 
+      geom_density(aes(x=!!sym(column),fill=eq_included_group),alpha=0.5) +
+      theme(legend.position = "right") + 
+    scale_fill_manual(values=c("brown","darkgreen")) 
+    
+    plot_list_density[[length(plot_list_density)+1]] <- pd
+    
+}
+
+pb <- wrap_plots(plot_list_boxplots,guides = "collect")
+pd <- wrap_plots(plot_list_density,guides = "collect")
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/lcms_boxplots.pdf",height = 50,width = 50)
+pb
+dev.off()
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/lcms_density.pdf",height = 50,width = 60)
+pd
+dev.off()
+```
+
+### Log-transformation
+
+Log-transformation.
+
+```{r}
+data_clean_log <- as.data.frame(
+  apply(completed_data,2,function(x) as.numeric(x)))
+
+data_clean_log <- log(data_clean_log)
+rownames(data_clean_log) <- rownames(completed_data)
+```
+
+### Tranformed plots 
+
+**Boxplots and density**
+
+```{r}
+plot_list_boxplots <- list()
+plot_list_density <- list()
+
+plot_df <- merge(data_clean_log %>% rownames_to_column("study_id"),
+                 metadata_df %>% dplyr::select("study_id","eq_included_group"),all=TRUE) %>%
+  drop_na()
+
+for (column in colnames(data_clean_log)){
+  # boxplot
+    p <- ggplot(plot_df) + 
+      geom_boxplot(aes(x="",y=!!sym(column)),outliers = FALSE) +
+    geom_jitter(height=0, width=0.3,
+                aes(x="",y=!!sym(column),color=eq_included_group)) + 
+    scale_color_manual(values=c("brown","darkgreen")) + 
+      theme(legend.position = "right")
+    
+    plot_list_boxplots[[length(plot_list_boxplots)+1]] <- p
+    
+    pd <- ggplot(plot_df) + 
+      geom_density(aes(x=!!sym(column),fill=eq_included_group),alpha=0.5) +
+      theme(legend.position = "right") + 
+    scale_fill_manual(values=c("brown","darkgreen")) 
+    
+    plot_list_density[[length(plot_list_density)+1]] <- pd
+    
+}
+
+pb <- wrap_plots(plot_list_boxplots,guides = "collect")
+pd <- wrap_plots(plot_list_density,guides = "collect")
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/log_lcms_boxplots.pdf",height = 50,width = 50)
+pb
+dev.off()
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/log_lcms_density.pdf",height = 50,width = 60)
+pd
+dev.off()
+```
+
+### Autoscaling
+
+```{r}
+data_scaled <- data_clean_log
+data_scaled <- scale(data_scaled, center = TRUE, scale = TRUE)
+```
+
+```{r}
+write.table(data_scaled,"../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",row.names = TRUE,sep="\t")
+```
+
+## NMR
+
+```{r}
+nmr_df <- read.xlsx(
+  "../../../Data/raw/metabolomics/NMR_metabolome_VGScreener.xlsx")
+
+metabolites <- nmr_df[1,4:30]
+nmr_df <- nmr_df[-c(1,2),]
+
+samplenames <- nmr_df[,1]
+rownames(nmr_df) <- samplenames
+
+nmr_df <- nmr_df[,-c(1,2,3)]
+colnames(nmr_df) <- metabolites
+
+nmr_df <- as.data.frame(apply(nmr_df,2,function(x) as.numeric(x))) %>%
+  `row.names<-`(samplenames)
+
+```
+
+### Missing value test
+
+0.44% of values are missing.
+
+```{r}
+df_for_test <- nmr_df
+df_for_test[df_for_test<=0] <- NA
+df_for_test[df_for_test==""] <- NA
+
+100*sum(is.na(df_for_test))/(488*27)
+```
+
+### Removing NaNs
+
+Removing metabolites when we have 20% missing.
+
+```{r}
+data_clean <- df_for_test %>%
+  t() %>% as.data.frame() %>% 
+  rownames_to_column("Metabolite") %>%
+  rowwise() %>%
+  filter(mean(is.na(c_across(-Metabolite))) < 0.2) %>%
+  ungroup()
+```
+
+
+### Imputation
+
+```{r}
+imputed_data <- mice(as.data.frame(t(data_clean[,-1])), 
+                     m = 5, method = 'pmm', seed = 123)
+
+completed_data <- complete(imputed_data, 1)
+
+colnames(completed_data) <- data_clean$Metabolite
+
+which(is.na(completed_data), arr.ind = TRUE)
+100*sum(is.na(completed_data))/(27*488)
+```
+
+We have succesfully imputed the missing data.
+
+**Comparison**
+
+To check the quality of imputation, we will plot the imputed values.
+
+```{r,fig.width=10}
+data_clean <- data_clean %>% 
+  column_to_rownames("Metabolite") %>%  
+  t() %>% as.data.frame()
+
+nans <- which(is.na(data_clean), arr.ind = TRUE)
+
+# first metabolite
+nans1 <- as.data.frame(nans) %>% dplyr::filter(col==unique(nans[,2])[1])
+
+plot_df <- as.data.frame(completed_data[,unique(nans1[,2])])
+plot_df$imputed <- "NO"
+plot_df$imputed[unique(nans1[,1])] <- "YES"
+colnames(plot_df) <- c("M1","imputed")
+
+p1 <- ggplot(plot_df) + 
+  geom_jitter(aes(x="",y=M1,color=imputed))
+
+# second metabolite
+# first metabolite
+nans2 <- as.data.frame(nans) %>% dplyr::filter(col==unique(nans[,2])[2])
+
+plot_df <- as.data.frame(completed_data[,unique(nans2[,2])])
+plot_df$imputed <- "NO"
+plot_df$imputed[unique(nans2[,1])] <- "YES"
+colnames(plot_df) <- c("M2","imputed")
+
+p2 <- ggplot(plot_df) + 
+  geom_jitter(aes(x="",y=M2,color=imputed))
+
+p1 + p2
+```
+
+The imputation looks fine, now lets see if the imputation did not disturb the overall composition using PCA.
+
+```{r}
+data_before <- data_clean
+data_before[is.na(data_before)] <- 0
+
+pca_before <- as.data.frame(
+  prcomp(data_before,center = TRUE,scale=TRUE)$x 
+)
+pca_before$imputed_sample <- "NO"
+pca_before$imputed_sample[unique(nans[,1])] <- "YES"
+
+p_before <- ggplot(pca_before) + 
+     geom_point(aes(x=PC1,y=PC2,color=imputed_sample)) + 
+     theme_minimal() + 
+     theme(panel.border = element_rect(color = "black", 
+                                       fill = NA, size = 0),
+           axis.ticks.x = element_line(size=0.3,color = "black"),
+           axis.ticks.y = element_line(size=0.3,color="black"),
+          axis.ticks.length = unit(4,"pt"),
+           axis.text = element_text(face = "bold",colour = "black"),
+           axis.title = element_text(face = "bold",colour = "black"),
+           panel.grid = element_blank()) + 
+     theme(legend.position = "right") 
+
+```
+
+```{r}
+pca_after <- as.data.frame(
+  prcomp(completed_data,center = TRUE,scale=TRUE)$x
+)
+pca_after$imputed_sample <- "NO"
+pca_after$imputed_sample[unique(nans[,1])] <- "YES"
+
+p_after <- ggplot(pca_after) + 
+     geom_point(aes(x=PC1,y=PC2,color=imputed_sample)) + 
+     theme_minimal() + 
+     theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
+           axis.ticks.x = element_line(size=0.3,color = "black"),
+           axis.ticks.y = element_line(size=0.3,color="black"),
+          axis.ticks.length = unit(4,"pt"),
+           axis.text = element_text(face = "bold",colour = "black"),
+           axis.title = element_text(face = "bold",colour = "black"),
+           panel.grid = element_blank()) + 
+     theme(legend.position = "right") 
+```
+
+Looks fine. 
+
+```{r}
+wrap_plots(p_before,p_after,guides = "collect")
+```
+
+### Non-tranformed plots 
+
+**Boxplots and density**
+
+```{r}
+metadata_df <- read.table("../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
+```
+
+```{r}
+plot_list_boxplots <- list()
+plot_list_density <- list()
+
+plot_df <- merge(completed_data %>% rownames_to_column("study_id"),
+                 metadata_df %>% dplyr::select("study_id","eq_included_group"),all=TRUE) %>%
+  drop_na()
+
+for (column in colnames(completed_data)){
+  # boxplot
+    p <- ggplot(plot_df) + 
+      geom_boxplot(aes(x="",y=!!sym(column)),outliers = FALSE) +
+    geom_jitter(height=0, width=0.3,
+                aes(x="",y=!!sym(column),color=eq_included_group)) + 
+    scale_color_manual(values=c("brown","darkgreen")) + 
+      theme(legend.position = "right")
+    
+    plot_list_boxplots[[length(plot_list_boxplots)+1]] <- p
+    
+    pd <- ggplot(plot_df) + 
+      geom_density(aes(x=!!sym(column),fill=eq_included_group),alpha=0.5) +
+      theme(legend.position = "right") + 
+    scale_fill_manual(values=c("brown","darkgreen")) 
+    
+    plot_list_density[[length(plot_list_density)+1]] <- pd
+    
+}
+
+pb <- wrap_plots(plot_list_boxplots,guides = "collect")
+pd <- wrap_plots(plot_list_density,guides = "collect")
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/nmr_boxplots.pdf",height = 50,width = 50)
+pb
+dev.off()
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/nmr_density.pdf",height = 50,width = 60)
+pd
+dev.off()
+```
+
+### Log-transformation
+
+Log-transformation and visualizing density plot.
+
+```{r}
+data_clean_log <- as.data.frame(
+  apply(completed_data,2,function(x) as.numeric(x))) %>%
+  `row.names<-`(samplenames)
+data_clean_log <- log(data_clean_log)
+```
+
+### Tranformed plots 
+
+**Boxplots and density**
+
+```{r}
+plot_list_boxplots <- list()
+plot_list_density <- list()
+
+plot_df <- merge(data_clean_log %>% rownames_to_column("study_id"),
+                 metadata_df %>% dplyr::select("study_id","eq_included_group"),all=TRUE) %>%
+  drop_na()
+
+for (column in colnames(data_clean_log)){
+  # boxplot
+    p <- ggplot(plot_df) + 
+      geom_boxplot(aes(x="",y=!!sym(column)),outliers = FALSE) +
+    geom_jitter(height=0, width=0.3,
+                aes(x="",y=!!sym(column),color=eq_included_group)) + 
+    scale_color_manual(values=c("brown","darkgreen")) + 
+      theme(legend.position = "right")
+    
+    plot_list_boxplots[[length(plot_list_boxplots)+1]] <- p
+    
+    pd <- ggplot(plot_df) + 
+      geom_density(aes(x=!!sym(column),fill=eq_included_group),alpha=0.5) +
+      theme(legend.position = "right") + 
+    scale_fill_manual(values=c("brown","darkgreen")) 
+    
+    plot_list_density[[length(plot_list_density)+1]] <- pd
+    
+}
+
+pb <- wrap_plots(plot_list_boxplots,guides = "collect")
+pd <- wrap_plots(plot_list_density,guides = "collect")
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/log_nmr_boxplots.pdf",height = 50,width = 50)
+pb
+dev.off()
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/log_nmr_density.pdf",height = 50,width = 60)
+pd
+dev.off()
+```
+
+### Autoscaling
+
+```{r}
+data_scaled <- data_clean_log
+data_scaled <- scale(data_scaled, center = TRUE, scale = TRUE)
+
+```
+
+```{r}
+write.table(data_scaled,"../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv",row.names = TRUE,sep="\t")
+```
+
+# Integration
+
+## vegans only
+
+Firstly, we need to import our data and get only vegans.
+
+```{r}
+lc_ms_df <- read.table("../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv")
+nmr_df <- read.table("../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv")
+metadata_df <- read.table("../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
+
+metadata_vegans <- metadata_df %>%
+  dplyr::filter(eq_included_group=="vegan")
+
+lc_ms_vegans <- lc_ms_df %>% 
+  dplyr::mutate(study_id=rownames(lc_ms_df)) %>% 
+  dplyr::filter(study_id %in% metadata_vegans$study_id) %>%
+  dplyr::select(-study_id)
+
+nmr_vegans <- nmr_df %>% 
+  dplyr::mutate(study_id=rownames(nmr_df)) %>% 
+  dplyr::filter(study_id %in% metadata_vegans$study_id) %>%
+  dplyr::select(-study_id)
+
+common_samples <- intersect(rownames(lc_ms_vegans), rownames(nmr_vegans))
+
+lc_ms_vegans <- lc_ms_vegans[common_samples,]
+nmr_vegans <- nmr_vegans[common_samples,]
+
+metadata_vegans <- metadata_vegans[metadata_vegans$study_id %in% common_samples,]
+```
+
+### MixOmics
+
+**SPCA**
+
+```{r}
+integrated_df <- cbind(nmr_vegans,lc_ms_vegans)
+
+spca_result <- mixOmics::spca(integrated_df,ncomp = 20)
+
+spca_data <- spca_result$variates$X
+
+write.table(spca_data,"../../../Data/preprocessed/metabolomics/spca_integrated_vegans.tsv",row.names = TRUE, sep="\t")
+```
+
+```{r}
+save(spca_result,file="../../Results/preprocessing/spca_result_vegans.RData")
+
+```
+
+## all samples
+
+Firstly, we need to import our data
+
+```{r}
+lc_ms_df <- read.table("../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv")
+
+nmr_df <- read.table("../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv")
+
+metadata_df <- read.table("../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
+
+common_samples <- intersect(rownames(lc_ms_df), rownames(nmr_df))
+
+lc_ms_df <- lc_ms_df[common_samples,]
+nmr_df <- nmr_df[common_samples,]
+
+```
+
+### MixOmics
+
+**SPCA**
+
+```{r}
+integrated_df <- cbind(nmr_df,lc_ms_df)
+
+spca_result <- mixOmics::spca(integrated_df,ncomp = 20)
+
+spca_data <- spca_result$variates$X
+
+write.table(spca_data,"../../../Data/preprocessed/metabolomics/spca_integrated_all.tsv",row.names = TRUE, sep="\t")
+```
+
+```{r}
+save(spca_result,file="../../Results/preprocessing/spca_result_all.RData")
+
+```
+
+
+# Exploratory analysis
+
+-   Histograms / density plots for each feature
+-   Correlation heatmaps (Spearman is robust)
+-   PCA or UMAP for metabolomics or tSNE
+-   Clustering: hierarchical or k-means, DBSCAN
+-   Predictive models
+-   univariate analysis
+-   multivariate regression analysis
+-   network anlaysis - DCPC?
+-   pathway analysis - mapping and enrichment analysis
+
+## LC-MS alone
+
+## NMR alone
+
+## Integrated dataset
+
+```{r}
+sessionInfo()
+```

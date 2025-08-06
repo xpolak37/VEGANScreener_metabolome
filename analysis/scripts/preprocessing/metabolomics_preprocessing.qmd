@@ -39,6 +39,7 @@ library(patchwork)
 library(ggvenn)
 library(tidyverse)
 library(ggpubr)
+library(pheatmap)
 ```
 
 # Preprocessing
@@ -115,7 +116,7 @@ write.table(metabolites_names,"../../../Data/preprocessed/metabolomics/lcms_meta
 
 ### Missing value test
 
-We miss 0.02% of data. 
+We miss 0.02% of data.
 
 ```{r}
 df_for_test <- lc_ms_df
@@ -127,7 +128,7 @@ df_for_test[df_for_test==""] <- NA
 
 ### Removing NaNs
 
-Removing metabolites when we have 20% missing. All metaboolites preserved. 
+Removing metabolites when we have 20% missing. All metaboolites preserved.
 
 ```{r}
 data_clean <- df_for_test %>%
@@ -223,13 +224,13 @@ p_after <- ggplot(pca_after) +
      theme(legend.position = "right") 
 ```
 
-Looks fine. 
+Looks fine.
 
 ```{r}
 wrap_plots(p_before,p_after,guides = "collect")
 ```
 
-### Non-tranformed plots 
+### Non-tranformed plots
 
 **Boxplots and density**
 
@@ -293,7 +294,7 @@ data_clean_log <- log(data_clean_log)
 rownames(data_clean_log) <- rownames(completed_data)
 ```
 
-### Tranformed plots 
+### Tranformed plots
 
 **Boxplots and density**
 
@@ -397,7 +398,6 @@ data_clean <- df_for_test %>%
   ungroup()
 ```
 
-
 ### Imputation
 
 ```{r}
@@ -498,13 +498,13 @@ p_after <- ggplot(pca_after) +
      theme(legend.position = "right") 
 ```
 
-Looks fine. 
+Looks fine.
 
 ```{r}
 wrap_plots(p_before,p_after,guides = "collect")
 ```
 
-### Non-tranformed plots 
+### Non-tranformed plots
 
 **Boxplots and density**
 
@@ -567,7 +567,7 @@ data_clean_log <- as.data.frame(
 data_clean_log <- log(data_clean_log)
 ```
 
-### Tranformed plots 
+### Tranformed plots
 
 **Boxplots and density**
 
@@ -683,9 +683,9 @@ save(spca_result,file="../../Results/preprocessing/spca_result_vegans.RData")
 Firstly, we need to import our data
 
 ```{r}
-lc_ms_df <- read.table("../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv")
+lc_ms_df <- read.table("../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",check.names = FALSE)
 
-nmr_df <- read.table("../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv")
+nmr_df <- read.table("../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv",check.names = FALSE)
 
 metadata_df <- read.table("../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
 
@@ -695,6 +695,46 @@ lc_ms_df <- lc_ms_df[common_samples,]
 nmr_df <- nmr_df[common_samples,]
 
 ```
+
+### Heatmap
+
+```{r}
+integrated_df <- cbind(nmr_df,lc_ms_df) %>% t() %>% as.data.frame() 
+
+annotation_samples <- metadata_df %>%
+  column_to_rownames("study_id") %>%
+  dplyr::select(eq_included_group,sex,Country,VS_total)
+
+annotation_metabolites <- integrated_df %>%
+  dplyr::mutate(Platform=c(rep("NMR",27),rep("LCMS",50))) %>%
+  dplyr::select(Platform)
+
+p <- pheatmap(integrated_df,
+              annotation_col = annotation_samples,
+              annotation_row = annotation_metabolites)
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/heatmap.pdf",height = 20,width = 40)
+p
+dev.off()
+```
+
+```{r}
+library(corrplot)
+library(ggplotify)
+M <- cor(integrated_df %>% t(),method = "spearman")
+p <- as.ggplot(corrplot(M, method = "circle"))
+```
+
+```{r,eval=FALSE}
+pdf("../../Results/preprocessing/corrplot.pdf",height = 30,width = 30)
+corrplot(M, method = "circle")
+dev.off()
+```
+
+### Corrplot
+
 
 ### MixOmics
 
@@ -714,7 +754,6 @@ write.table(spca_data,"../../../Data/preprocessed/metabolomics/spca_integrated_a
 save(spca_result,file="../../Results/preprocessing/spca_result_all.RData")
 
 ```
-
 
 # Exploratory analysis
 

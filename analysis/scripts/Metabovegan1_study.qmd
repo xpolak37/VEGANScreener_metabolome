@@ -23,6 +23,7 @@ library(ranger)
 library(doParallel)
 library(dummy)
 library(patchwork)
+  library(pROC)
 })
 
 ```
@@ -152,7 +153,7 @@ roc_curve <- function(model_object,
     roc_c <- make_bi_roc_curve(
       model_object,
       group,
-      CI=CI)
+      CI=CI) 
   } else if (family=="multinomial") {
     roc_c <- make_multi_roc_curve(model_object,CI=CI) + 
       ggtitle(paste0(
@@ -163,6 +164,9 @@ roc_curve <- function(model_object,
       ))  
   }
   
+  roc_c <- roc_c + 
+    geom_segment(aes(x = 0, y = 0, xend = 1, yend = 1), 
+                 inherit.aes = FALSE, linetype = "dashed", color = "grey")
     return(roc_c)
 }
 
@@ -250,7 +254,13 @@ make_bi_roc_curve <- function(model_object,group,CI=FALSE){
             axis.ticks.length = unit(4,"pt")) + 
       ylab("Sensitivity") + xlab("1-specificity") + 
       scale_color_manual(values=color) + 
-      scale_fill_manual(values=color)
+      scale_fill_manual(values=color) + 
+    ggtitle(paste0(
+      group[1],' vs ',group[2],
+      ' (AUC = ', round(model_object$model_summary$auc,3), 
+      ', P = ',(mean(model_object$valid_performances$auc_validation<0.5)*3),
+      ')'
+      ))  
   } else {
     ggroc_data <- ggroc(model_object$kfold_rocobjs)$data
     roc_c <- ggplot(data=ggroc_data) + 
@@ -420,6 +430,49 @@ make_multi_roc_curve <- function(model_object,CI=FALSE){
   }
   
   return(roc_c)
+}
+
+volcano_plot <- function(data,comparison="diet"){
+  if (comparison=="diet"){
+    color_coding_labels <- c("Insignificant",
+                             "Enriched in vegans",
+                             "Enriched in omnivores")
+    color_coding_colors <- c("Insignificant"="lightgrey",
+                                "Enriched in vegans"="#1b9e77",
+                                "Enriched in omnivores"="#7570b3")
+    volcano_df <- data %>%
+      dplyr::filter(str_starts(variable,"eq_included_group"))
+  } else if (comparison=="sex"){
+    color_coding_labels <- c("Insignificant",
+                             "Enriched in males",
+                             "Enriched in females")
+    color_coding_colors <- c("Insignificant"="lightgrey",
+                                "Enriched in males"="#1f77b4",
+                                "Enriched in females"="#e377c2")
+
+    volcano_df <- data %>%
+      dplyr::filter(str_starts(variable,"sex"))
+  }
+  volcano_df <- volcano_df %>%
+  dplyr::select(metabolite,Estimate,p_adjusted) %>%
+  dplyr::mutate(p_to_plot=-log10(p_adjusted)) %>%
+  dplyr::mutate(Color_coding=ifelse(p_adjusted>0.05,color_coding_labels[1],
+                                    ifelse(Estimate>0,color_coding_labels[2],
+                                           color_coding_labels[3]))) %>%
+  dplyr::mutate(Label=ifelse(p_adjusted<0.05,metabolite,""))
+
+maximum <- max(c(abs(min(volcano_df$Estimate)), abs(max(volcano_df$Estimate))))
+
+p <- ggplot(data=volcano_df,aes(x=Estimate,y=p_to_plot,color=Color_coding,
+                                label=Label)) + 
+  geom_point(shape=19, size=3) + 
+  theme_bw() + 
+  xlab("Effect size") + ylab("- log"[10]~" p-adjusted value") + 
+  scale_color_manual(values = color_coding_colors) + 
+  coord_cartesian(xlim = c(-maximum,maximum), clip="on") + 
+  geom_text_repel(show.legend = FALSE)
+
+return(p)
 }
 ```
 
@@ -896,6 +949,11 @@ make_rf_model <- function(data,
 
 ## Tests
 
+results_list <- lapply(colnames(spca_integrated_df), 
+                       function(x) fit_glm(x,spca_for_uni,
+                                           tested_variable = "eq_included_group"))
+results_df <- do.call(rbind, results_list)
+
 ```{r}
 fit_glm <- function(metab,data,
                     tested_variable = NULL,
@@ -903,22 +961,22 @@ fit_glm <- function(metab,data,
   if (tested_variable=="eq_included_group"){
     if (intcheck) {
     formula <- as.formula(paste(
-      metab, "~ eq_included_group + age + sex + bmi"))
+      metab, "~ age + sex + bmi + eq_included_group"))
     }
     else {
       formula <- as.formula(paste(
-      metab, "~ eq_included_group * Country + age + sex + bmi"))
+      metab, "~ age + sex + bmi + Country * eq_included_group"))
     } 
   } else if (tested_variable=="Country"){
     formula <- as.formula(paste(
-      metab, "~  Country + age + sex + bmi"))
+      metab, "~  age + sex + bmi + Country"))
   } else if (tested_variable=="sex"){
     if (intcheck) {
     formula <- as.formula(paste(
-      metab, "~ sex + age + bmi"))
+      metab, "~ age + bmi + eq_included_group + sex"))
     } else {
     formula <- as.formula(paste(
-      metab, "~ sex * Country + age + bmi"))
+      metab, "~ age + bmi + eq_included_group * sex"))
   }
   }
   
@@ -926,7 +984,6 @@ fit_glm <- function(metab,data,
   # Try to fit model, handle errors if any
   model <- glm(formula, data = data)
 
-  
   # Extract coefficients summary, p-values, etc.
   coef_summary <- as.data.frame(summary(model)$coefficients) %>% 
     rownames_to_column("variable")
@@ -993,11 +1050,12 @@ pairwise_glm <- function(spca_for_uni,tested_variable=NULL){
 
 metadata_df <- read.table("../../data/preprocessed/dietary/veganscreener_preprocessed.tsv",header = TRUE)
 
-lcms_df <- read.table("../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv")
+lcms_df <- read.table("../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",check.names = FALSE)
 
-nmr_df <- read.table("../../data/preprocessed/metabolomics/nmr_preprocessed.tsv")
+nmr_df <- read.table("../../data/preprocessed/metabolomics/nmr_preprocessed.tsv",check.names = FALSE)
 
-spca_integrated_df <-  read.table("../../data/preprocessed/metabolomics/spca_integrated_all.tsv")
+spca_integrated_df <-  read.table("../../data/preprocessed/metabolomics/spca_integrated_all.tsv",
+                                  check.names = FALSE)
 
 ```
 
@@ -1045,8 +1103,38 @@ p
 ```
 
 ```{r}
-pdf("../Results/spca_PCA_OM_vs_VG.pdf",height = 4,width = 6)
+pdf("../results/spca_PCA_OM_vs_VG.pdf",height = 4,width = 6)
 p
+dev.off()
+```
+
+```{r,fig.width=10}
+plot_list <- list()
+for (col in colnames(spca_plot_df)[22:101]){
+  p <- ggplot(spca_plot_df) + 
+  geom_point(aes(x=PC1,y=PC2,color=!!sym(col))) + 
+  theme_minimal() + 
+  theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
+        axis.ticks.x = element_line(size=0.3,color = "black"),
+        axis.ticks.y = element_line(size=0.3,color="black"),
+        axis.ticks.length = unit(4,"pt"),
+        axis.text = element_text(face = "bold",colour = "black"),
+        axis.title = element_text(face = "bold",colour = "black"),
+        panel.grid = element_blank()) + 
+    theme(legend.position = "right")  + 
+  xlab(x_lab) + 
+  ylab(y_lab)
+
+plot_list[[length(plot_list)+1]] <- p
+}
+
+a <- ggarrange(plotlist = plot_list)
+
+```
+
+```{r}
+pdf("../Results/spca_PCAs.pdf",height = 20,width = 40)
+a
 dev.off()
 ```
 
@@ -1092,7 +1180,7 @@ dev.off()
 
 ```{r,fig.width=10}
 plot_list <- list()
-for (col in colnames(pca_df)[461:482]){
+for (col in colnames(pca_df)[52:131]){
   p <- ggplot(pca_df) + 
   geom_point(aes(x=PC1,y=PC2,color=!!sym(col))) + 
   theme_minimal() + 
@@ -1115,7 +1203,7 @@ a <- ggarrange(plotlist = plot_list)
 ```
 
 ```{r}
-pdf("../Results/lcms_PCAs.pdf",height = 20,width = 20)
+pdf("../Results/lcms_PCAs.pdf",height = 20,width = 40)
 a
 dev.off()
 ```
@@ -1129,7 +1217,7 @@ data.pca <- prcomp(nmr_df)
 ```{r}
 pca_df <- merge(as.data.frame(data.pca$x) %>%
                   rownames_to_column("study_id") ,
-                metadata_df_outliers,by="study_id")
+                metadata_df,by="study_id")
 
 
 imp_vec <- data.pca$sdev^2
@@ -1137,23 +1225,6 @@ x_lab = paste("PC1 ", "(",round(imp_vec[1],2),"%", ")", sep="")
 y_lab = paste("PC2 ", "(",round(imp_vec[2],2),"%", ")", sep="")
 ```
 
-```{r}
-p <- ggplot(pca_df) + 
-  geom_point(aes(x=PC1,y=PC2,color=metabo_outlier)) + 
-  theme_minimal() + 
-  theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
-        axis.ticks.x = element_line(size=0.3,color = "black"),
-        axis.ticks.y = element_line(size=0.3,color="black"),
-        axis.ticks.length = unit(4,"pt"),
-        axis.text = element_text(face = "bold",colour = "black"),
-        axis.title = element_text(face = "bold",colour = "black"),
-        panel.grid = element_blank()) + 
-    theme(legend.position = "right")  + 
-  xlab(x_lab) + 
-  ylab(y_lab)
-
-p
-```
 
 ```{r}
 p <- ggplot(pca_df) + 
@@ -1576,573 +1647,42 @@ p <- ggplot(nmr_plot_df) +
 p
 ```
 
-# Metabolomics dataset - without outliers
-
-```{r}
-
-metadata_df <- read.table("../../data/preprocessed/dietary/veganscreener_preprocessed.tsv",header = TRUE) %>%
-  dplyr::filter(!(study_id %in% outliers$study_id))
-
-lcms_df <- read.table("../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv") %>%
-  { .[!(rownames(.) %in% outliers$study_id), ] }
-
-nmr_df <- read.table("../../data/preprocessed/metabolomics/nmr_preprocessed.tsv") %>%
-  { .[!(rownames(.) %in% outliers$study_id), ] }
-
-spca_integrated_df <-  read.table("../../data/preprocessed/metabolomics/spca_integrated_all_no_outliers.tsv") %>%
-  { .[!(rownames(.) %in% outliers$study_id), ] }
-
-```
-
-## PCA
-
-### SPCA
-
-```{r,fig.width=10,fig.height=4}
-p <- pca_plot(spca_integrated_df,
-              metadata_df,
-              color_col = "eq_included_group",
-              perform_pca = FALSE)
-```
-
-```{r}
-pdf("../Results/spca_PCA_OM_vs_VG_nooutliers.pdf",height = 4,width = 6)
-p
-dev.off()
-```
-
-```{r,fig.width=10}
-plot_list <- list()
-for (col in colnames(spca_plot_df)[22:101]){
-  p <- pca_plot(spca_integrated_df,
-              metadata_df,
-              color_col = col,
-              perform_pca = FALSE)
-  
-
-  plot_list[[length(plot_list)+1]] <- p
-}
-
-a <- ggarrange(plotlist = plot_list)
-
-```
-
-```{r}
-pdf("../Results/spca_PCAs_no_outliers.pdf",height = 20,width = 30)
-a
-dev.off()
-```
-
-### LCMS
-
-```{r,fig.width=10}
-p <- pca_plot(df = lcms_df,
-              metadata = metadata_df,
-              color_col = "eq_included_group",
-              perform_pca = TRUE)
-
-p
-```
-
-```{r}
-pdf("../Results/lcms_PCA_OM_vs_VG_nooutliers.pdf",height = 4,width = 6)
-p
-dev.off()
-```
-
-```{r,fig.width=10}
-plot_list <- list()
-for (col in colnames(metadata_df)[-1]){
-  p <- pca_plot(df = lcms_df,
-              metadata = metadata_df,
-              color_col = col,
-              perform_pca = TRUE)
-
-
-  plot_list[[length(plot_list)+1]] <- p
-}
-
-a <- ggarrange(plotlist = plot_list)
-
-```
-
-```{r}
-pdf("../Results/lcms_PCAs_no_outliers.pdf",height = 20,width = 40)
-a
-dev.off()
-```
-
-### NMR
-
-```{r}
-
-p <- pca_plot(nmr_df,
-            metadata_df,
-            color_col = "eq_included_group",
-            perform_pca = TRUE)
-
-p
-```
-
-```{r}
-pdf("../Results/NMR_PCA_OM_vs_VG_nooutliers.pdf",height = 4,width = 6)
-p
-dev.off()
-```
-
-```{r,fig.width=10}
-plot_list <- list()
-for (col in colnames(metadata_df)[-1]){
-  p <- pca_plot(
-    df = nmr_df,
-    metadata = metadata_df,
-    color_col = col,
-    perform_pca = TRUE
-  )
-
-plot_list[[length(plot_list)+1]] <- p
-}
-
-a <- ggarrange(plotlist = plot_list)
-
-```
-
-```{r}
-pdf("../Results/nmr_PCAs_no_outliers.pdf",height = 20,width = 40)
-a
-dev.off()
-```
-
-## UMAP
-
-### SPCA
-
-```{r,fig.height=4,fig.width=10}
-p <- umap_plot(spca_integrated_df,metadata_df,
-               color_col =  "eq_included_group",
-               neighbors = 10,
-               min_dist = 0.5)
-
-p
-```
-
-```{r, eval=FALSE}
-n = c(5, 10, 15, 30, 50, 100)
-m = c(0.01, 0.05, 0.1, 0.3, 0.5)
-p_list <- list()
-
-for (n_i in n){
-    for (m_i in m){
-        p <- umap_plot(spca_integrated_df,metadata_df,
-               neighbors = n_i,
-               min_dist = m_i,color_col  = "eq_included_group") + 
-          theme(legend.position = "none")
-        p_list[[length(p_list)+1]] <- p
-    }
-}
-
-a <- ggarrange(plotlist = p_list)
-```
-
-### LCMS
-
-```{r,fig.height=4,fig.width=10}
-p <- umap_plot(lcms_df,metadata_df,
-               color_col = "eq_included_group",
-               neighbors = 100,
-               min_dist = 0.5)
-
-p
-```
-
-```{r, eval=FALSE}
-n = c(5, 10, 15, 30, 50, 100)
-m = c(0.01, 0.05, 0.1, 0.3, 0.5)
-p_list <- list()
-
-for (n_i in n){
-    for (m_i in m){
-        p <- umap_plot(lcms_df,kmeans_clusters,
-               neighbors = n_i,
-               min_dist = m_i)
-        p_list[[length(p_list)+1]] <- p
-    }
-}
-
-a <- ggarrange(plotlist = p_list)
-```
-
-### NMR
-
-```{r,fig.height=4,fig.width=10}
-p <- umap_plot(nmr_df,metadata_df,
-               color_col = "eq_included_group",
-               neighbors = 50,
-               min_dist = 0.1)
-
-p
-```
-
-```{r, eval=FALSE}
-n = c(5, 10, 15, 30, 50, 100)
-m = c(0.01, 0.05, 0.1, 0.3, 0.5)
-p_list <- list()
-
-for (n_i in n){
-    for (m_i in m){
-        p <- umap_plot(nmr_df,metadata_df,
-               neighbors = n_i,
-               min_dist = m_i,
-               color_col = "eq_included_group") + 
-          theme(legend.position = "none")
-        p_list[[length(p_list)+1]] <- p
-    }
-}
-
-a <- ggarrange(plotlist = p_list)
-```
-
-For now, we have decided to exlude the outliers from the analysis
-
-```{r}
-lcms_df <- lcms_df %>%
-  dplyr::filter(!(rownames(lcms_df) %in% outliers$study_id))
-
-spca_integrated_df <- spca_integrated_df %>%
-  dplyr::filter(!(rownames(spca_integrated_df) %in% outliers$study_id))
-```
-
-## Clustering
-
-### k-means
-
-#### SPCA
-
-```{r}
-data <- spca_integrated_df
-
-# Range of k values to test
-k_range <- 2:10
-
-# Store average scores 
-silhouette_scores <- numeric(length(k_range))
-ch_scores <- numeric(length(k_range))
-
-# Loop over k values
-for (i in seq_along(k_range)) {
-  k <- k_range[i]
-  
-  # K-means clustering
-  km_res <- kmeans(data, centers = k, nstart = 10)
-  
-  # Silhouette analysis
-  sil <- silhouette(km_res$cluster, dist(data))
-  silhouette_scores[i] <- mean(sil[, 3])
-  
-   # Calinski–Harabasz score
-  ch <- intCriteria(as.matrix(data), as.integer(km_res$cluster), c("Calinski_Harabasz"))
-  ch_scores[i] <- ch$calinski_harabasz
-}
-
-
-```
-
-```{r}
-# Combine results
-results_df <- data.frame(
-  k = k_range,
-  Silhouette = silhouette_scores,
-  Calinski_Harabasz = ch_scores
-)
-
-print(results_df)
-
-# Plot both scores
-par(mfrow = c(1, 2))
-plot(results_df$k, results_df$Silhouette, type = "b", pch = 19,
-     xlab = "k", ylab = "Average Silhouette Score", main = "Silhouette Index")
-plot(results_df$k, results_df$Calinski_Harabasz, type = "b", pch = 19,
-     xlab = "k", ylab = "Calinski–Harabasz Index", main = "CH Index")
-```
-
-We will proceed with k=2
-
-```{r}
-km_res <- kmeans(data, centers = 2, nstart = 10)
-clusters_kmeans <- km_res$cluster
-
-metadata_clusters <- merge(metadata_df,
-                     as.data.frame(km_res$cluster) %>%
-                       rownames_to_column("study_id") %>%
-                       `colnames<-`(c("study_id","Cluster")),
-                     by="study_id",
-                     all.x = TRUE)
-```
-
-Lets do color coding of these clusters in the UMAP plot.
-
-```{r,fig.height=3,fig.width=4}
-p <- umap_plot(spca_integrated_df,metadata_clusters,
-               shape_col = "eq_included_group",
-               neighbors = 50,
-               min_dist = 0.3)
-
-p
-```
-
-**PCA**
-
-```{r}
-spca_plot_df <- merge(spca_integrated_df %>% rownames_to_column("study_id"),
-                      metadata_clusters,by="study_id")
-
-
-p <- ggplot(spca_plot_df) + 
-  geom_point(aes(x=PC1,y=PC2,color=Cluster,shape=eq_included_group)) + 
-  theme_minimal() + 
-  theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
-        axis.ticks.x = element_line(size=0.3,color = "black"),
-        axis.ticks.y = element_line(size=0.3,color="black"),
-        axis.ticks.length = unit(4,"pt"),
-        axis.text = element_text(face = "bold",colour = "black"),
-        axis.title = element_text(face = "bold",colour = "black"),
-        panel.grid = element_blank()) + 
-    theme(legend.position = "right") 
-
-p
-```
-
-#### LCMS
-
-```{r}
-data <- lcms_df
-
-# Range of k values to test
-k_range <- 2:10
-
-# Store average scores 
-silhouette_scores <- numeric(length(k_range))
-ch_scores <- numeric(length(k_range))
-
-# Loop over k values
-for (i in seq_along(k_range)) {
-  k <- k_range[i]
-  
-  # K-means clustering
-  km_res <- kmeans(data, centers = k, nstart = 10)
-  
-  # Silhouette analysis
-  sil <- silhouette(km_res$cluster, dist(data))
-  silhouette_scores[i] <- mean(sil[, 3])
-  
-   # Calinski–Harabasz score
-  ch <- intCriteria(as.matrix(data), as.integer(km_res$cluster), c("Calinski_Harabasz"))
-  ch_scores[i] <- ch$calinski_harabasz
-}
-
-
-```
-
-```{r}
-# Combine results
-results_df <- data.frame(
-  k = k_range,
-  Silhouette = silhouette_scores,
-  Calinski_Harabasz = ch_scores
-)
-
-print(results_df)
-
-# Plot both scores
-par(mfrow = c(1, 2))
-plot(results_df$k, results_df$Silhouette, type = "b", pch = 19,
-     xlab = "k", ylab = "Average Silhouette Score", main = "Silhouette Index")
-plot(results_df$k, results_df$Calinski_Harabasz, type = "b", pch = 19,
-     xlab = "k", ylab = "Calinski–Harabasz Index", main = "CH Index")
-```
-
-We will proceed with k=2
-
-```{r}
-km_res <- kmeans(data, centers = 2, nstart = 10)
-clusters_kmeans <- km_res$cluster
-
-metadata_clusters <- merge(metadata_df,
-                     as.data.frame(km_res$cluster) %>%
-                       rownames_to_column("study_id") %>%
-                       `colnames<-`(c("study_id","Cluster")),
-                     by="study_id",
-                     all.x = TRUE)
-```
-
-Lets do color coding of these clusters in the UMAP plot.
-
-```{r,fig.height=3,fig.width=4}
-p <- umap_plot(lcms_df,metadata_clusters,
-               shape_col = "eq_included_group",
-               neighbors = 50,
-               min_dist = 0.3)
-
-p
-```
-
-**PCA**
-
-```{r}
-
-lcms_pca_df  <- as.data.frame(prcomp(lcms_df,scale. = TRUE,center = TRUE)$x)
-
-lcms_plot_df <- merge(lcms_pca_df %>% rownames_to_column("study_id"),
-                      metadata_clusters,by="study_id")
-
-p <- ggplot(lcms_plot_df) + 
-  geom_point(aes(x=PC1,y=PC2,color=Cluster,shape=eq_included_group)) + 
-  theme_minimal() + 
-  theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
-        axis.ticks.x = element_line(size=0.3,color = "black"),
-        axis.ticks.y = element_line(size=0.3,color="black"),
-        axis.ticks.length = unit(4,"pt"),
-        axis.text = element_text(face = "bold",colour = "black"),
-        axis.title = element_text(face = "bold",colour = "black"),
-        panel.grid = element_blank()) + 
-    theme(legend.position = "right") 
-
-p
-```
-
-#### NMR
-
-```{r}
-data <- nmr_df
-
-# Range of k values to test
-k_range <- 2:10
-
-# Store average scores 
-silhouette_scores <- numeric(length(k_range))
-ch_scores <- numeric(length(k_range))
-
-# Loop over k values
-for (i in seq_along(k_range)) {
-  k <- k_range[i]
-  
-  # K-means clustering
-  km_res <- kmeans(data, centers = k, nstart = 10)
-  
-  # Silhouette analysis
-  sil <- silhouette(km_res$cluster, dist(data))
-  silhouette_scores[i] <- mean(sil[, 3])
-  
-   # Calinski–Harabasz score
-  ch <- intCriteria(as.matrix(data), as.integer(km_res$cluster), c("Calinski_Harabasz"))
-  ch_scores[i] <- ch$calinski_harabasz
-}
-
-
-```
-
-```{r}
-# Combine results
-results_df <- data.frame(
-  k = k_range,
-  Silhouette = silhouette_scores,
-  Calinski_Harabasz = ch_scores
-)
-
-print(results_df)
-
-# Plot both scores
-par(mfrow = c(1, 2))
-plot(results_df$k, results_df$Silhouette, type = "b", pch = 19,
-     xlab = "k", ylab = "Average Silhouette Score", main = "Silhouette Index")
-plot(results_df$k, results_df$Calinski_Harabasz, type = "b", pch = 19,
-     xlab = "k", ylab = "Calinski–Harabasz Index", main = "CH Index")
-```
-
-We will proceed with k=2
-
-```{r}
-km_res <- kmeans(data, centers = 2, nstart = 10)
-clusters_kmeans <- km_res$cluster
-
-metadata_clusters <- merge(metadata_df,
-                     as.data.frame(km_res$cluster) %>%
-                       rownames_to_column("study_id") %>%
-                       `colnames<-`(c("study_id","Cluster")),
-                     by="study_id",
-                     all.x = TRUE)
-```
-
-Lets do color coding of these clusters in the UMAP plot.
-
-```{r,fig.height=3,fig.width=4}
-p <- umap_plot(nmr_df,metadata_clusters,
-               shape_col = "eq_included_group",
-               neighbors = 50,
-               min_dist = 0.3)
-
-p
-```
-
-**PCA**
-
-```{r}
-
-nmr_pca_df  <- as.data.frame(prcomp(nmr_df,scale. = TRUE,center = TRUE)$x)
-
-nmr_plot_df <- merge(nmr_pca_df %>% rownames_to_column("study_id"),
-                      metadata_clusters,by="study_id")
-
-
-p <- ggplot(nmr_plot_df) + 
-  geom_point(aes(x=PC1,y=PC2,color=Cluster,shape=eq_included_group)) + 
-  theme_minimal() + 
-  theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
-        axis.ticks.x = element_line(size=0.3,color = "black"),
-        axis.ticks.y = element_line(size=0.3,color="black"),
-        axis.ticks.length = unit(4,"pt"),
-        axis.text = element_text(face = "bold",colour = "black"),
-        axis.title = element_text(face = "bold",colour = "black"),
-        panel.grid = element_blank()) + 
-    theme(legend.position = "right") 
-
-p
-```
 
 # Global difference
 
 ```{r}
+metadata_df <- read.table(
+  "../../data/preprocessed/dietary/veganscreener_preprocessed.tsv",
+  header = TRUE,
+  check.names = FALSE) 
 
-metadata_df <- read.table("../../data/preprocessed/dietary/veganscreener_preprocessed.tsv",header = TRUE) %>%
-  dplyr::filter(!(study_id %in% outliers$study_id))
-
-spca_integrated_df <-  read.table("../../data/preprocessed/metabolomics/spca_integrated_all_no_outliers.tsv") %>%
-  { .[!(rownames(.) %in% outliers$study_id), ] }
-
-spca_integrated_df <- spca_integrated_df %>%
-  dplyr::filter(rownames(spca_integrated_df) %in% metadata_df$study_id)
+spca_integrated_df <-  read.table(
+  "../../data/preprocessed/metabolomics/spca_integrated_all.tsv",
+  check.names = FALSE )
 
 metadata_df <- metadata_df %>%
   dplyr::filter(study_id %in% rownames(spca_integrated_df))
+
+spca_integrated_df <- spca_integrated_df %>%
+  dplyr::filter(rownames(spca_integrated_df) %in% metadata_df$study_id)
 ```
 
 ## PERMANOVA
 
 We are testing how much of the variation in metabolomics is explained by:
-
--   eq_included_group (main variable)
-
--   Country
-
--   sex
-
--   age
-
--   bmi
+ - sex
+ - age
+ - bmi
+ - Country
+ - diet group
+ 
 
 Variables were added sequentially (Type I SS), so each p-value and R² reflects a partial effect, after adjusting for those above.
+This model accounts for variation due to sex, age, and BMI. Then accounts for the main effects of country and dietary group. Then test whether the effect of dietary group varies by country (interaction).
 
-Diet group explains **9%** of variation **before any adjustment**. Strong effect. Country explains an **additional \~20%** of variation, after diet is accounted for Sex adds \~3.4% more variance explanation. Age has small but significant effect. BMI has also a small effect, but statistically significant. \~66.6% of the variation remains unexplained.
+Diet group explains **8.3%** of variation after adjusting for sex, age,bmi and country.
+
+Country explains an **10%** of variation. The interaction effect is also significant (p=0.002), which suggest the effect of diet is different in each country. We will epxlore this in further analysis.
 
 ```{r}
 
@@ -2151,7 +1691,11 @@ dist_mat <- vegdist(spca_integrated_df,
                     method = "euclidean")
 
 # Test whether vegan vs omnivore differ in metabolomics
-adonis_result <- adonis2(dist_mat ~ Country + sex + age + bmi + eq_included_group, data = metadata_df , permutations = 999,by="terms")
+adonis_result <- adonis2(
+  dist_mat ~ sex + age + bmi + Country*eq_included_group, 
+  data = metadata_df , 
+  permutations = 999,
+  by="terms")
 
 print(adonis_result)
 
@@ -2180,8 +1724,7 @@ for (col in c("eq_included_group","Country","sex","age","bmi")){
   p <- pca_plot(spca_integrated_df,
               metadata_df,
               color_col = col,
-              perform_pca = FALSE) + 
-     labs(color = "Title") 
+              perform_pca = FALSE) 
 
   plot_list[[length(plot_list)+1]] <- p 
 }
@@ -2195,7 +1738,7 @@ a
 ```
 
 ```{r,eval=FALSE}
-pdf("../Results/PCA_legend.pdf",height = 5,width = 10)
+pdf("../Results/pca_main_variables_spca.pdf",height = 5,width = 10)
 a
 dev.off()
 ```
@@ -2256,7 +1799,7 @@ rf_model <- make_rf_model(data=prepared_df,
                           outcome="Group",
                           N = 10,
                           file = model_name,
-                          reuse=TRUE)
+                          reuse=FALSE)
 
 roc_c <- roc_curve(model_object = rf_model, 
                    group = c("Female","Male"),CI = TRUE)
@@ -2310,7 +1853,7 @@ results_df <- do.call(rbind, results_list)
 results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
 ```
 
-Look at significant results - **PC2**, **PC4**, **PC5**
+Look at significant results - **PC1**, **PC3**
 
 ```{r}
 results_df %>%
@@ -2319,12 +1862,12 @@ results_df %>%
 
 ```
 
-Check the interaction effect - **PC5**, **PC8**, **PC10**, **PC12**,**PC17**
+Check the interaction effect - **none**
 
 ```{r}
 df <- results_df %>%
-  dplyr::filter(Pr...t..<0.05) %>%
-  dplyr::filter(str_starts(variable, "eq_included_groupvegan:"))
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(str_ends(variable, ":eq_included_groupvegan"))
 
 df
 
@@ -2333,7 +1876,9 @@ pc_to_be_removed <- df$metabolite
 
 Find the individual directions within each country, mark the particular PC as "to_remove" if the direction is not the same across countries.
 
-```{r}
+**No need because it is not significant**
+
+```{r,eval=FAlSE}
 # variable for saving the results
 final_df <- data.frame()
 
@@ -2383,6 +1928,7 @@ pc_to_remove <- final_df %>%
 Keep only PCs that have same direction when significant interaction.
 
 ```{r}
+pc_to_remove <- NULL
 significant_pcs <- results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
   dplyr::filter(variable=="eq_included_groupvegan") %>%
@@ -2391,9 +1937,16 @@ significant_pcs <- results_df %>%
 significant_pcs
 ```
 
+**Volcano plot**
+
+```{r}
+vp <- volcano_plot(results_df)
+vp
+```
+
 ### RF importance
 
-There is a clear pattern and match with univariate analysis results. When taking account also the density plot, we see that **PC2**, **PC5** are definitely important in the separation of omnivores and vegans.
+There is a clear pattern and match with univariate analysis results. When taking account also the density plot, we see that **PC1**, **PC3** are definitely important in the separation of omnivores and vegans.
 
 ```{r}
 a <- load("../intermediate_files/models/diet_model/rf_model.RData")
@@ -2409,40 +1962,103 @@ ggplot(var_imp) +
 
 ### Loadings
 
-We will analyze the metabolites that contribute to **PC2** and **PC5** the most.
+We will analyze the metabolites that contribute to **PC1** and **PC3** the most.
 
 ```{r}
-load("../Results/preprocessing/spca_result.RData")
+load("../results/preprocessing/spca_result_all.RData")
+```
+
+**Increased in vegans**
+
+```{r}
+loadings <- spca_result$rotation[, 1]  # loadings for PC1
+
+# Sort by absolute value to find strongest contributors
+top_vars <- sort(abs(loadings), decreasing = TRUE)
+
+# View top 10 variables contributing to PC1
+#top_vars[1:10]
+
+# View the variables with the "significant" loadings, the threshold is determined
+# by the formula 1/sqrt(number of variables)
+increased_in_vegans <- top_vars[top_vars>(1/(sqrt(length(top_vars))))]
+increased_in_vegans
 ```
 
 ```{r}
-loadings_PC2 <- spca_result$rotation[, 2]  # loadings for PC2
+loadings <- spca_result$rotation[, 3]  # loadings for PC3
 
 # Sort by absolute value to find strongest contributors
-top_vars <- sort(abs(loadings_PC2), decreasing = TRUE)
-
-# View top 10 variables contributing to PC1
-top_vars[1:10]
+top_vars <- sort(abs(loadings), decreasing = TRUE)
 
 # View the variables with the "significant" loadings, the threshold is determined
 # be the formula 1/sqrt(number of variables)
-top_vars[top_vars>(1/(sqrt(length(top_vars))))]
+decreased_in_vegans <- top_vars[top_vars>(1/(sqrt(length(top_vars))))]
+decreased_in_vegans
 ```
 
 ```{r}
-loadings_PC5 <- spca_result$rotation[, 5]  # loadings for PC2
+list_to_save <- list(
+  "increased_in_vegans"=
+    as.data.frame(increased_in_vegans) %>% rownames_to_column("metabolite"),
+  "increased_in_omnivores"= 
+    as.data.frame(decreased_in_vegans) %>% rownames_to_column("metabolite")
+  )
 
-# Sort by absolute value to find strongest contributors
-top_vars <- sort(abs(loadings_PC5), decreasing = TRUE)
-
-# View top 10 variables contributing to PC1
-top_vars[1:10]
-
-# View the variables with the "significant" loadings, the threshold is determined
-# be the formula 1/sqrt(number of variables)
-top_vars[top_vars>(1/(sqrt(length(top_vars))))]
+write.xlsx(list_to_save,
+  "../results/diet_associated_metabolites.xlsx",rownames=TRUE)
 ```
 
+### Test of metabolites
+
+```{r}
+lc_ms_df <- read.table("../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",check.names = FALSE)
+
+nmr_df <- read.table("../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv",check.names = FALSE)
+
+metadata_df <- read.table("../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
+
+lcms_df <- lcms_df %>%
+  dplyr::filter(rownames(lcms_df) %in% metadata_df$study_id)
+
+## NMR
+nmr_df <- nmr_df %>%
+  dplyr::filter(rownames(nmr_df) %in% metadata_df$study_id)
+
+common_samples <- intersect(rownames(lc_ms_df), rownames(nmr_df))
+
+lc_ms_df <- lc_ms_df[common_samples,]
+
+nmr_df <- nmr_df[common_samples,]
+
+```
+
+```{r}
+integrated_df <- cbind(lc_ms_df,nmr_df) %>%
+  dplyr::select(names(increased_in_vegans),names(decreased_in_vegans))
+
+df_for_uni <- merge(integrated_df %>% rownames_to_column("study_id"),
+                      metadata_df,by="study_id",all = TRUE)
+
+```
+
+```{r}
+results_list <- lapply(colnames(integrated_df), 
+                       function(x) fit_glm(x,df_for_uni,
+                                           tested_variable = "eq_included_group"))
+results_df <- do.call(rbind, results_list)
+
+results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
+```
+
+Look at significant results - **PC1**, **PC3**
+
+```{r}
+results_df %>%
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(variable=="eq_included_groupvegan")
+
+```
 ## Country-specific
 
 ### glm
@@ -2484,7 +2100,7 @@ a
 dev.off()
 ```
 
-Call glm to explore which metabolites had significant different between countries. There is a strong signal in **PC1**, **PC3**, **PC4**.
+Call glm to explore which metabolites had significant different between countries. There is a signal in **PC1**, **PC4**,**PC5**,**PC7**,**PC14**
 
 ```{r}
 glm_res <- pairwise_glm(spca_for_uni,tested_variable = "Country")
@@ -2515,59 +2131,15 @@ ggplot(var_imp) +
   geom_col(aes(x=PC,y=Importance))
 ```
 
-### Loadings
+### Loadings ?
 
-We will analyze the metabolites that contribute to **PC1**, **PC3** and **PC4** the most.
-
-```{r}
-load("../Results/preprocessing/spca_result.RData")
-```
-
-```{r}
-loadings_PC1 <- spca_result$rotation[, 1]  # loadings for PC1
-
-# Sort by absolute value to find strongest contributors
-top_vars <- sort(abs(loadings_PC1), decreasing = TRUE)
-
-# View top 10 variables contributing to PC1
-top_vars[1:10]
-
-# View the variables with the "significant" loadings, the threshold is determined
-# be the formula 1/sqrt(number of variables)
-top_vars[top_vars>(1/(sqrt(length(top_vars))))]
-```
-
-```{r}
-loadings_PC3 <- spca_result$rotation[, 3]  # loadings for PC3
-
-# Sort by absolute value to find strongest contributors
-top_vars <- sort(abs(loadings_PC3), decreasing = TRUE)
-
-# View top 10 variables contributing to PC3
-top_vars[1:10]
-
-# View the variables with the "significant" loadings, the threshold is determined
-# be the formula 1/sqrt(number of variables)
-top_vars[top_vars>(1/(sqrt(length(top_vars))))]
-```
-
-```{r}
-loadings_PC4 <- spca_result$rotation[, 4]  # loadings for PC4
-
-# Sort by absolute value to find strongest contributors
-top_vars <- sort(abs(loadings_PC4), decreasing = TRUE)
-
-# View top 10 variables contributing to PC4
-top_vars[1:10]
-
-# View the variables with the "significant" loadings, the threshold is determined
-# be the formula 1/sqrt(number of variables)
-top_vars[top_vars>(1/(sqrt(length(top_vars))))]
-```
+As there are no clearly important PC, we will not extract the metabolites from the loadings.
 
 ## Sex-specific
 
 ### glm
+
+There can be a signal in **PC1** and **PC5**
 
 ```{r,fig.height=15}
 spca_for_uni <- merge(spca_integrated_df %>% rownames_to_column("study_id"),
@@ -2597,7 +2169,7 @@ a
 dev.off()
 ```
 
-Call glm to explore which metabolites had significant different between dietary groups.
+Call glm to explore which metabolites had significant different between males and females.
 
 ```{r}
 results_list <- lapply(
@@ -2622,7 +2194,7 @@ Check the interaction effect.
 ```{r}
 df <- results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(str_starts(variable, "sexM:"))
+  dplyr::filter(str_ends(variable, ":sexM"))
 
 df
 
@@ -2631,7 +2203,7 @@ pc_to_be_removed <- df$metabolite
 
 Find the individual directions within each country, mark the particular PC as "to_remove" if the direction is not the same across countries.
 
-```{r}
+```{r,eval=FALSE}
 final_df <- data.frame()
 for (country in unique(spca_for_uni$Country)) {
   subdf <- spca_for_uni %>%
@@ -2674,6 +2246,11 @@ significant_pcs <- results_df %>%
 significant_pcs
 ```
 
+```{r}
+vp <- volcano_plot(results_df,comparison = "sex")
+vp
+```
+
 ### RF importance
 
 There is a clear pattern and match with univariate analysis results. We can say that **PC8** is definitely important for SEX separation, as there is clear pattern in density plot, glm analysis and high RF variable importance.
@@ -2690,9 +2267,9 @@ ggplot(var_imp) +
   geom_col(aes(x=PC,y=Importance))
 ```
 
-### Loadings
+### Loadings ??
 
-We will analyze the metabolites that contribute to **PC8** the most.
+We will analyze the metabolites that contribute to **PC1**, **PC4**, **PC5**, and **PC6** the most.
 
 ```{r}
 load("../Results/preprocessing/spca_result.RData")

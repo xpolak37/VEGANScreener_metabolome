@@ -330,13 +330,13 @@ pb <- wrap_plots(plot_list_boxplots,guides = "collect")
 pd <- wrap_plots(plot_list_density,guides = "collect")
 ```
 
-```{r,eval=FALSE}
+```{r,eval=TRUE}
 pdf("../../Results/preprocessing/log_lcms_boxplots.pdf",height = 50,width = 50)
 pb
 dev.off()
 ```
 
-```{r,eval=FALSE}
+```{r,eval=TRUE}
 pdf("../../Results/preprocessing/log_lcms_density.pdf",height = 50,width = 60)
 pd
 dev.off()
@@ -603,13 +603,13 @@ pb <- wrap_plots(plot_list_boxplots,guides = "collect")
 pd <- wrap_plots(plot_list_density,guides = "collect")
 ```
 
-```{r,eval=FALSE}
+```{r,eval=TRUE}
 pdf("../../Results/preprocessing/log_nmr_boxplots.pdf",height = 50,width = 50)
 pb
 dev.off()
 ```
 
-```{r,eval=FALSE}
+```{r,eval=TRUE}
 pdf("../../Results/preprocessing/log_nmr_density.pdf",height = 50,width = 60)
 pd
 dev.off()
@@ -634,27 +634,20 @@ write.table(data_scaled,"../../../Data/preprocessed/metabolomics/nmr_preprocesse
 Firstly, we need to import our data and get only vegans.
 
 ```{r}
-lc_ms_df <- read.table("../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv")
+lcms_df <- read.table("../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv")
 nmr_df <- read.table("../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv")
 metadata_df <- read.table("../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
 
 metadata_vegans <- metadata_df %>%
   dplyr::filter(eq_included_group=="vegan")
 
-lc_ms_vegans <- lc_ms_df %>% 
-  dplyr::mutate(study_id=rownames(lc_ms_df)) %>% 
-  dplyr::filter(study_id %in% metadata_vegans$study_id) %>%
-  dplyr::select(-study_id)
 
-nmr_vegans <- nmr_df %>% 
-  dplyr::mutate(study_id=rownames(nmr_df)) %>% 
-  dplyr::filter(study_id %in% metadata_vegans$study_id) %>%
-  dplyr::select(-study_id)
+common_samples <- Reduce(intersect, list(rownames(lcms_df),
+                                     rownames(nmr_df), 
+                                     metadata_vegans$study_id))
 
-common_samples <- intersect(rownames(lc_ms_vegans), rownames(nmr_vegans))
-
-lc_ms_vegans <- lc_ms_vegans[common_samples,]
-nmr_vegans <- nmr_vegans[common_samples,]
+lcms_vegans <- lcms_df[common_samples,]
+nmr_vegans <- nmr_df[common_samples,]
 
 metadata_vegans <- metadata_vegans[metadata_vegans$study_id %in% common_samples,]
 ```
@@ -664,7 +657,7 @@ metadata_vegans <- metadata_vegans[metadata_vegans$study_id %in% common_samples,
 **SPCA**
 
 ```{r}
-integrated_df <- cbind(nmr_vegans,lc_ms_vegans)
+integrated_df <- cbind(nmr_vegans,lcms_vegans)
 
 spca_result <- mixOmics::spca(integrated_df,ncomp = 20)
 
@@ -683,23 +676,32 @@ save(spca_result,file="../../Results/preprocessing/spca_result_vegans.RData")
 Firstly, we need to import our data
 
 ```{r}
-lc_ms_df <- read.table("../../../Data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",check.names = FALSE)
+lcms_df <- read.table(
+  "../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",
+  check.names = FALSE)
 
-nmr_df <- read.table("../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv",check.names = FALSE)
+nmr_df <- read.table(
+  "../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv",
+  check.names = FALSE)
 
-metadata_df <- read.table("../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",header=TRUE)
+metadata_df <- read.table(
+  "../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",
+  header=TRUE)
 
-common_samples <- intersect(rownames(lc_ms_df), rownames(nmr_df))
+common_samples <- Reduce(intersect, list(rownames(lcms_df),
+                                     rownames(nmr_df), 
+                                     metadata_df$study_id))
 
-lc_ms_df <- lc_ms_df[common_samples,]
+lcms_df <- lcms_df[common_samples,]
 nmr_df <- nmr_df[common_samples,]
+metadata_df <- metadata_df %>% dplyr::filter(study_id %in% common_samples)
 
 ```
 
 ### Heatmap
 
 ```{r}
-integrated_df <- cbind(nmr_df,lc_ms_df) %>% t() %>% as.data.frame() 
+integrated_df <- cbind(nmr_df,lcms_df) %>% t() %>% as.data.frame() 
 
 annotation_samples <- metadata_df %>%
   column_to_rownames("study_id") %>%

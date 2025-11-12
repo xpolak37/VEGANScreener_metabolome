@@ -1,0 +1,148 @@
+---
+title: "Dietary preprocessing"
+format: html
+editor: visual
+---
+
+```{r}
+library(openxlsx)
+library(data.table)
+library(DataExplorer)
+library(patchwork)
+```
+
+# PDI exploration
+
+```{r}
+pdi_df <- as.data.frame(fread("../../../data/raw/food_groups/PDIGroups_AllCountries.tsv"))
+```
+
+```{r}
+pdi_avg_df <- pdi_df %>%
+  group_by(client) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  as.data.frame()
+```
+
+ABOUT PDI https://pmc.ncbi.nlm.nih.gov/articles/PMC10257227/#bib15 https://journals.plos.org/plosmedicine/article?id=10.1371/journal.pmed.1002039
+
+```{r}
+apply(pdi_avg_df,2,function(x) length(unique(x)))
+```
+
+Basic plots for visualizing the distribution:
+
+```{r,fig.width=25}
+plot_list <- list()
+name <- colnames(pdi_avg_df)[c(-1,-2)]
+i <- 1
+for (col in name){
+  p <- ggplot(pdi_avg_df) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(pdi_avg_df[,col],na.rm = TRUE),2),"+-", round(sd(pdi_avg_df[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+
+# Preprocessing
+
+## Imputation
+
+No need for imputation
+
+```{r}
+pdi_avg_df[pdi_avg_df==""] <- NA
+
+sum(is.na(pdi_avg_df))
+```
+
+```{r}
+pdf("../../Results/preprocessing/pdi_density_plots.pdf",width = 10,height = 5)
+plot_density(pdi_avg_df)
+dev.off()
+```
+
+## Log-transformation
+
+Log-transformation and visualizing density plot.
+
+```{r}
+pdi_avg_df <- pdi_avg_df %>% column_to_rownames("client") %>%
+  select(-country)
+
+data_clean_log <- pdi_avg_df
+data_clean_log[data_clean_log==0] <- 0.01
+
+data_clean_log <- as.data.frame(
+  apply(data_clean_log,2,function(x) as.numeric(x)))
+data_clean_log <- log(data_clean_log)
+rownames(data_clean_log) <- rownames(pdi_avg_df)
+
+data_clean_log$hpdi_an <- pdi_avg_df$hpdi_an
+data_clean_log$updi_an <- pdi_avg_df$updi_an
+
+```
+
+```{r}
+pdf("../../Results/preprocessing/pdi_plots_log.pdf",width = 10,height = 5)
+plot_density(data_clean_log)
+dev.off()
+```
+
+## Autoscaling
+
+```{r}
+data_scaled <- data_clean_log
+data_scaled <- scale(data_scaled, center = TRUE, scale = TRUE)
+
+data_scaled[data_scaled=="NaN"] <- 0
+
+```
+
+```{r,fig.width=25}
+plot_list <- list()
+name <- colnames(data_scaled)[c(-1,-2)]
+i <- 1
+for (col in name){
+  p <- ggplot(data_scaled) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(data_scaled[,col],na.rm = TRUE),2),"+-", round(sd(data_scaled[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+
+```{r}
+pdf("../../Results/preprocessing/pdi_plots_scaled.pdf",width = 10,height = 5)
+plot_density(data_scaled)
+dev.off()
+```
+
+```{r}
+filtered_df <- data_scaled[, colMeans(is.na(data_scaled)) < 0.5]
+```
+
+```{r}
+write.table(filtered_df,"../../../Data/preprocessed/dietary/pdi_preprocessed_11.tsv",row.names = TRUE,sep="\t")
+```

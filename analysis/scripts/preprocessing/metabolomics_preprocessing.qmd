@@ -59,7 +59,7 @@ metabolites_lcms <- metabolites_names_lcms$ident
 **NMR**
 
 ```{r}
-nmr_df <- read.xlsx("../../../Data/raw/metabolomics/NMR_metabolome_VGScreener.xlsx")
+nmr_df <- read.xlsx("../../../Data/raw/metabolomics/edited/NMR_metabolome_VGScreener.xlsx")
 
 metabolites_nmr <- nmr_df[1,4:30]
 nmr_df <- nmr_df[-c(1,2),]
@@ -110,7 +110,7 @@ lc_ms_df <- lc_ms_df %>%
 
 rownames(lc_ms_df) <- NULL
 
-write.table(metabolites_names,"../../../Data/preprocessed/metabolomics/lcms_metabolites_identification.tsv",sep="\t")
+#write.table(metabolites_names,"../../../Data/preprocessed/metabolomics/lcms_metabolites_identification.tsv",sep="\t")
 
 ```
 
@@ -357,7 +357,7 @@ write.table(data_scaled,"../../../Data/preprocessed/metabolomics/lc_ms_preproces
 
 ```{r}
 nmr_df <- read.xlsx(
-  "../../../Data/raw/metabolomics/NMR_metabolome_VGScreener.xlsx")
+  "../../../Data/raw/metabolomics/edited/NMR_metabolome_VGScreener.xlsx")
 
 metabolites <- nmr_df[1,4:30]
 nmr_df <- nmr_df[-c(1,2),]
@@ -654,7 +654,7 @@ metadata_vegans <- metadata_vegans[metadata_vegans$study_id %in% common_samples,
 
 ### MixOmics
 
-**SPCA**
+### SPCA
 
 ```{r}
 integrated_df <- cbind(nmr_vegans,lcms_vegans)
@@ -671,26 +671,108 @@ save(spca_result,file="../../Results/preprocessing/spca_result_vegans.RData")
 
 ```
 
+### PLS-R
+
+```{r}
+integrated_df <- cbind(nmr_vegans,lcms_vegans)
+
+# Covariates to adjust for
+covars <- c("sex", "Country", "bmi", "age")
+
+all(rownames(integrated_df) == metadata_vegans$study_id)
+#adjusted_data <- adjust_for_covars(integrated_df, covars, metadata_df)
+adjusted_data <- integrated_df
+  
+  
+# Prepare for PLS
+pls_res <- mixOmics::pls(adjusted_data, metadata_vegans$VS_total, ncomp = 1)
+
+# Explore components
+mixOmics::plotIndiv(pls_res)
+
+pls_components_df <- pls_res$variates$X
+
+mixOmics::plotIndiv(pls_res,
+          comp = c(1,2),
+          group = group,
+          legend = TRUE,
+          ellipse = TRUE,
+          ind.names = FALSE,
+          title = "PLS-DA on Residuals (Adjusted for Covariates)")
+
+# Cross-validation
+set.seed(123)
+perf_res <- mixOmics::perf(pls_res, 
+                 validation = "Mfold", 
+                 folds = 5, progressBar = TRUE, nrepeat = 50)
+
+# Look at Q2
+print(perf_res$measures$R2$summary)
+
+perf_res$measures$Q2$summary
+
+# Plot RMSEP vs ncomp
+plot(rmsep_vals$mean, type = "b",
+     xlab = "Number of Components", ylab = "RMSEP")
+
+pls_res <- mixOmics::pls(adjusted_data, metadata_vegans$VS_total, ncomp = 1)
+pls_components_df <- pls_res$variates$X
+
+
+```
+
+Interpretation: Q² is a measure of predictive quality:
+
+Values closer to 1 mean good predictability.
+
+Values \> 0.4 are generally considered decent in omics.
+
+Negative Q² means the model predicts worse than the mean (no predictive power).
+
+Here, only the first component has Q² near 0.38, which is borderline decent but not great.
+
+Adding more components makes Q² drop sharply, becoming negative.
+
+This means adding more than 1 component does not improve and actually worsens prediction.
+
+```{r}
+write.table(pls_components_df,"../../../Data/preprocessed/metabolomics/pls_integrated_vegans.tsv",row.names = TRUE, sep="\t")
+
+save(pls_res,file="../../Results/preprocessing/pls_result_vegans.RData")
+
+```
+
 ## all samples
 
 Firstly, we need to import our data
 
 ```{r}
-lcms_df <- read.table(
-  "../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",
-  check.names = FALSE)
+lcms_df <- read.table("../../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",check.names = FALSE)
 
 nmr_df <- read.table(
-  "../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv",
+  "../../../Data/preprocessed/metabolomics/nmr_preprocessed.tsv",
   check.names = FALSE)
 
 metadata_df <- read.table(
-  "../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",
+  "../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",
   header=TRUE)
 
-common_samples <- Reduce(intersect, list(rownames(lcms_df),
-                                     rownames(nmr_df), 
-                                     metadata_df$study_id))
+common_samples <- Reduce(intersect, list(as.character(rownames(lcms_df)),
+                                     as.character(rownames(nmr_df)), 
+                                    as.character(metadata_df$study_id)))
+
+common_samples <- Reduce(intersect, list(as.character(rownames(nmr_df)), 
+                                    as.character(metadata_df$study_id)))
+
+# Samples in nmr_df but not in metadata_df
+missing_in_metadata <- setdiff(as.character(rownames(nmr_df)), metadata_df$study_id)
+
+missing_in_metadata
+
+# Samples in metadata_df but not in nmr_df
+missing_in_nmr_df <- setdiff(as.character(metadata_df$study_id),rownames(nmr_df))
+
+missing_in_nmr_df
 
 lcms_df <- lcms_df[common_samples,]
 nmr_df <- nmr_df[common_samples,]
@@ -737,13 +819,12 @@ dev.off()
 
 ### Corrplot
 
-
 ### MixOmics
 
-**SPCA**
+#### SPCA
 
 ```{r}
-integrated_df <- cbind(nmr_df,lc_ms_df)
+integrated_df <- cbind(nmr_df,lcms_df)
 
 spca_result <- mixOmics::spca(integrated_df,ncomp = 20)
 
@@ -754,6 +835,166 @@ write.table(spca_data,"../../../Data/preprocessed/metabolomics/spca_integrated_a
 
 ```{r}
 save(spca_result,file="../../Results/preprocessing/spca_result_all.RData")
+
+```
+
+#### PLS-DA
+
+```{r}
+adjust_for_covars <- function(mat, covars, meta) {
+  residuals_mat <- matrix(NA, nrow = nrow(mat), ncol = ncol(mat))
+  colnames(residuals_mat) <- colnames(mat)
+  rownames(residuals_mat) <- rownames(mat)
+  
+  for (i in seq_len(ncol(mat))) {
+    df <- data.frame(y = mat[, i], meta[, covars, drop = FALSE])
+    model <- lm(y ~ ., data = df)
+    residuals_mat[, i] <- resid(model)
+  }
+  return(residuals_mat)
+}
+
+# Covariates to adjust for
+covars <- c("sex", "Country", "bmi", "age")
+
+integrated_df <- cbind(nmr_df,lc_ms_df)
+all(rownames(integrated_df) == metadata_df$study_id)
+#adjusted_data <- adjust_for_covars(integrated_df, covars, metadata_df)
+adjusted_data <- integrated_df
+
+# Prepare PLS-DA
+# group as a factor
+group <- factor(metadata_df$eq_included_group, levels = c("vegan", "omnivore"))
+
+# Run PLS-DA
+plsda_res <- mixOmics::plsda(adjusted_data, group, ncomp = 10)
+components_df <- plsda_res$variates$X
+
+# Plot results
+mixOmics::plotIndiv(plsda_res,
+          comp = c(1,2),
+          group = group,
+          legend = TRUE,
+          ellipse = TRUE,
+          ind.names = FALSE,
+          title = "PLS-DA on Residuals (Adjusted for Covariates)")
+
+# Cross-validation
+set.seed(123)
+perf_res <- mixOmics::perf(plsda_res, 
+                 validation = "Mfold", 
+                 folds = 5, progressBar = TRUE, nrepeat = 50)
+
+print(perf_res$error.rate)
+
+# -----------------------------
+# 3. Permutation testing
+# -----------------------------
+nperm <- 100 # increase for stronger testing
+perm.accuracy <- numeric(nperm)
+
+set.seed(123)
+for (i in 1:nperm) {
+  group_perm <- sample(group)  # shuffle labels
+  perm.model <- mixOmics::plsda(adjusted_data, group,ncomp = 2)
+  perm.perf <- mixOmics::perf(perm.model,
+                    validation = "Mfold",
+                    folds = 5,
+                    nrepeat = 20) # fewer repeats to save time
+  perm.accuracy[i] <- mean(perm.perf$error.rate$overall)
+}
+
+# Observed accuracy
+obs.accuracy <- mean(perf_res$error.rate$overall)
+
+# p-value
+p.value <- mean(perm.accuracy <= obs.accuracy)
+cat("Observed accuracy:", obs.accuracy, "\n")
+cat("Permutation p-value:", p.value, "\n")
+
+
+plsda_res <- mixOmics::plsda(adjusted_data, group, ncomp =4 )
+plsda_components_df <- plsda_res$variates$X
+
+
+```
+
+```{r}
+write.table(plsda_components_df,"../../../Data/preprocessed/metabolomics/plsda_integrated_all.tsv",row.names = TRUE, sep="\t")
+
+save(plsda_res,file="../../Results/preprocessing/plsda_result_all.RData")
+
+```
+
+#### PLS-R
+
+```{r}
+integrated_df <- cbind(nmr_df,lcms_df)
+
+# Covariates to adjust for
+covars <- c("sex", "Country", "bmi", "age")
+
+integrated_df <- cbind(nmr_df,lcms_df)
+all(rownames(integrated_df) == metadata_df$study_id)
+#adjusted_data <- adjust_for_covars(integrated_df, covars, metadata_df)
+adjusted_data <- integrated_df
+  
+  
+# Prepare for PLS
+pls_res <- mixOmics::pls(adjusted_data, metadata_df$VS_total, ncomp = 5)
+
+# Explore components
+mixOmics::plotIndiv(pls_res)
+
+pls_components_df <- pls_res$variates$X
+
+mixOmics::plotIndiv(pls_res,
+          comp = c(1,2),
+          group = group,
+          legend = TRUE,
+          ellipse = TRUE,
+          ind.names = FALSE,
+          title = "PLS-DA on Residuals (Adjusted for Covariates)")
+
+# Cross-validation
+set.seed(123)
+perf_res <- mixOmics::perf(pls_res, 
+                 validation = "Mfold", 
+                 folds = 5, progressBar = TRUE, nrepeat = 50)
+
+# Look at Q2
+print(perf_res$measures$R2$summary)
+
+perf_res$measures$Q2$summary
+
+# Plot RMSEP vs ncomp
+plot(rmsep_vals$mean, type = "b",
+     xlab = "Number of Components", ylab = "RMSEP")
+
+pls_res <- mixOmics::pls(adjusted_data, metadata_df$VS_total, ncomp = 1)
+pls_components_df <- pls_res$variates$X
+
+
+```
+
+Interpretation: Q² is a measure of predictive quality:
+
+Values closer to 1 mean good predictability.
+
+Values \> 0.4 are generally considered decent in omics.
+
+Negative Q² means the model predicts worse than the mean (no predictive power).
+
+Here, only the first component has Q² near 0.38, which is borderline decent but not great.
+
+Adding more components makes Q² drop sharply, becoming negative.
+
+This means adding more than 1 component does not improve and actually worsens prediction.
+
+```{r}
+write.table(pls_components_df,"../../../Data/preprocessed/metabolomics/pls_integrated_all.tsv",row.names = TRUE, sep="\t")
+
+save(pls_res,file="../../Results/preprocessing/pls_result_all.RData")
 
 ```
 

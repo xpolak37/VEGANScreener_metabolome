@@ -5,6 +5,39 @@ editor: visual
 ---
 
 ```{r}
+library(openxlsx)
+```
+
+
+# Food groups merging and consolidating
+
+```{r}
+df <- read.xlsx("../../../data/raw/food_groups/VG_ITEMS_24.07_MERGED_CLEANED_CORRECT_FOODGROUPS_ONLY.xlsx")
+```
+
+ABOUT PDI https://pmc.ncbi.nlm.nih.gov/articles/PMC10257227/#bib15
+https://journals.plos.org/plosmedicine/article?id=10.1371/journal.pmed.1002039
+
+```{r}
+apply(df,2,function(x) length(unique(x)))
+```
+
+```{r}
+writeLines(unique(df$foodgroup),"../../../docs/info_foodgroups/foodgroups.txt")
+writeLines(unique(df$MAINgroup),"../../../docs/info_foodgroups/maingroups.txt")
+writeLines(unique(df$PDIgroup),"../../../docs/info_foodgroups/pdigroups.txt")
+```
+
+NAs in PDI
+
+```{r}
+pdi_na <- df %>% dplyr::filter(is.na(PDIgroup))
+
+unique(pdi_na$MAINgroup)  
+unique(pdi_na$foodgroup)  
+```
+
+```{r}
 library(dplyr)
 ```
 

@@ -12,6 +12,7 @@ library(VIM)
 library(naniar)
 library(tidyverse)
 library(openxlsx)
+library(data.table)
 ```
 
 # VEGANSCREENER
@@ -21,6 +22,17 @@ dietary_df <- read.table("../../../Data/raw/veganscreener/metadata_extracted.tsv
 
 dietary_df <- dietary_df %>%
   dplyr::select(!ends_with("_2"))
+
+true_df <- fread("../../../docs/data_for_analysis/FullData_with_NUTRIXO.csv")
+needed_columns <- readLines("../../../docs/columns_metadata_petra_VS.txt")
+needed_columns <- gsub(" $","",needed_columns)
+true_df <- true_df %>% dplyr::select(needed_columns)
+
+
+dietary_df <- merge(dietary_df %>% 
+                      dplyr::select(study_id,age,bmi,sex,Country,eating_habits,
+                                    eq_vegan_dur_total,eq_included_group)
+                    ,true_df,by = "study_id",all = TRUE)
 ```
 
 In DE, there are vegans only.
@@ -37,7 +49,7 @@ dietary_df %>% dplyr::group_by(eq_included_group,Country) %>%
   count() 
 ```
 
-## Missing values imputation 
+## Missing values imputation
 
 ### Missing data analysis
 
@@ -46,8 +58,7 @@ dietary_df %>% dplyr::group_by(eq_included_group,Country) %>%
 ```{r}
 dietary_df[dietary_df==""] <- NA
 
-dietary_df <- 
-  dietary_df %>% 
+dietary_df <- dietary_df %>% 
   mutate_if(is.character, as.factor)
 
 summary(dietary_df)
@@ -62,13 +73,13 @@ df <- as.data.frame(miss_var_summary(dietary_df)) %>%
 write.xlsx(df,"../../Results/preprocessing/missing_values_summary.xlsx")
 ```
 
-- 196 people are missing bdi_score, happy, physical_health, health_status at once
+-   196 people are missing bdi_score, happy, physical_health, health_status at once
 
-- 176 people have all values filled out
+-   176 people have all values filled out
 
-- 62 people miss the information the information about vegan_excpt_something
+-   62 people miss the information the information about vegan_excpt_something
 
-- 49 people miss the previous + bdi_score, happy, physical_health, health_status -> these are all omnivores (62+49+1=112)
+-   49 people miss the previous + bdi_score, happy, physical_health, health_status -\> these are all omnivores (62+49+1=112)
 
 ```{r,fig.width=10,fig.height=4}
 aggr(dietary_df[,1:23], numbers = TRUE, prop = FALSE)
@@ -99,7 +110,7 @@ p <- cor(dummyNA) %>% round(digits = 2)
 pheatmap(p,cluster_rows = FALSE,cluster_cols = FALSE)
 ```
 
-Correlation between variables with missing values and variable with non-missing values. 
+Correlation between variables with missing values and variable with non-missing values.
 
 ```{r,fig.height=25,fig.width=5}
 p <- cor(dietary_df %>% mutate_if(is.factor, as.numeric), 
@@ -113,11 +124,9 @@ p[abs(p)!=1] <- 0
 pheatmap(p,cluster_rows = FALSE,cluster_cols = FALSE)
 ```
 
-To make it more visible, we extract only rows with evident correlation.
-study_id, country, eating_habits, eq_included_group, diet_supplements, malt_num, milk_num, chee_num, b12_num, vitd_num, VS_total
+To make it more visible, we extract only rows with evident correlation. study_id, country, eating_habits, eq_included_group, diet_supplements, malt_cat, milk_cat, chee_cat, b12_cat, vitd_cat, VS_total
 
-
-The missing information about physical and emotional health is country specific - countries with lower IDs like BE, CZ tends to not have this information. 
+The missing information about physical and emotional health is country specific - countries with lower IDs like BE, CZ tends to not have this information.
 
 The correlation of eq_vegan_dur_total is not relevant, as this points out the patterns between vegans and omnivores (as NA=omnivore).
 
@@ -125,7 +134,7 @@ The correlation of eq_vegan_dur_total is not relevant, as this points out the pa
 p <- cor(dietary_df %>% 
            dplyr::select(study_id, Country, eating_habits, 
                          eq_included_group, diet_supplements, 
-                         malt_num, milk_num, chee_num, b12_num, vitd_num,
+                         malt_cat, milk_cat, chee_cat, b12_cat, vitd_cat,
                          VS_total) %>%
            mutate_if(is.factor, as.numeric), 
     dummyNA, use = "pairwise.complete.obs") %>% 
@@ -145,12 +154,11 @@ The null hypothesis is the missing data is MCAR. Thus, a higher p value indicate
 
 **Our data are MAR or MNAR.**
 
-
 ```{r}
 mcar_test(dietary_df %>% 
            dplyr::select(Country, eating_habits, 
                          eq_included_group, diet_supplements, 
-                         malt_num, milk_num, chee_num, b12_num, vitd_num,
+                         malt_cat, milk_cat, chee_cat, b12_cat, vitd_cat,
                          VS_total, bmi, eq_vegan_dur_total, education,
                       family_income, residence_area, bdi_score, happy,
                       physical_health, health_status))
@@ -179,7 +187,7 @@ pm <- ini$predictorMatrix
 meth <- ini$method
 ```
 
-We extracted these pre-set terms and edited it manually according to the recommendations from https://stefvanbuuren.name/fimd/sec-modelform.html#sec:predictors. 
+We extracted these pre-set terms and edited it manually according to the recommendations from https://stefvanbuuren.name/fimd/sec-modelform.html#sec:predictors.
 
 ```{r,eval=FALSE}
 write.xlsx(pm,"../../Results/preprocessing/prediction_matrix.xlsx",rowNames = TRUE)
@@ -192,14 +200,14 @@ write.xlsx(quickpred(dietary_df_forimp),"../../Results/preprocessing/quick_pred.
 
 We will impute values in 9 columns:
 
-- bmi
-- sex
-- education
-- family_income
-- residence_area
-- diet_supplements
-- sleep_duration
-- wbre_num
+-   bmi
+-   sex
+-   education
+-   family_income
+-   residence_area
+-   diet_supplements
+-   sleep_duration
+-   wbre_cat
 
 ```{r}
 pm <- read.xlsx("../../Results/preprocessing/quick_pred_mutated.xlsx",
@@ -208,13 +216,12 @@ pm <- read.xlsx("../../Results/preprocessing/quick_pred_mutated.xlsx",
 meth <- ini$method
 imputed_columns <- rownames(pm %>% dplyr::filter(rowSums(.)>0))
 imputed_columns <- c("bmi","sex","education","family_income","residence_area",
-                     "diet_supplements","sleep_duration","wbre_num")
+                     "diet_supplements","sleep_duration","wbre_cat")
 meth[!(names(meth) %in% imputed_columns)] <- ""
 #meth[meth!=""] <- "pmm"
 ```
 
 https://stackoverflow.com/questions/73682067/mice-not-imputing-all-variables-with-missing-values
-
 
 ```{r}
 
@@ -255,6 +262,165 @@ dietary_df_clean <- dietary_regImp %>%
 ```
 
 ```{r}
+write.table(dietary_df,"../../../Data/preprocessed/dietary/veganscreener_metadata.tsv",sep="\t",row.names = FALSE)
+
 write.table(dietary_df_clean,"../../../Data/preprocessed/dietary/veganscreener_preprocessed.tsv",sep="\t",row.names = FALSE)
 ```
 
+# VS tottal
+
+```{r}
+df <- fread("../../../data/preprocessed/dietary/veganscreener_preprocessed.tsv") 
+```
+
+```{r}
+df <- df %>% dplyr::mutate(gveg_score=case_when(
+    gveg_cat %in% "red" ~ 0,
+    gveg_cat %in% "yellow" ~ 2,
+    gveg_cat %in% "green" ~ 4
+  )) %>%
+  dplyr::mutate(rveg_score=case_when(
+    rveg_cat %in% "red" ~ 0,
+    rveg_cat %in% "yellow" ~ 1 ,
+    rveg_cat %in% "green" ~ 2 
+  )) %>%
+  dplyr::mutate(oveg_score=case_when(
+    oveg_cat %in% "red" ~ 0,
+    oveg_cat %in% "yellow" ~ 1,
+    oveg_cat %in% "green" ~ 2
+  )) %>%
+  dplyr::mutate(ofru_score=case_when(
+    ofru_cat %in% "red" ~ 0,
+    ofru_cat %in% "yellow" ~ 1,
+    ofru_cat %in% "green"~ 2
+  )) %>% 
+  dplyr::mutate(pot_score=case_when(
+    pot_cat %in% "red" ~ 0,
+    pot_cat %in% "yellow" ~ 1,
+    pot_cat %in% "green"~ 2
+  )) %>% 
+  dplyr::mutate(whbr_score=case_when(
+    whbr_cat %in% "red" ~ 0,
+    whbr_cat %in% "yellow" ~ 1,
+    whbr_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(wric_score=case_when(
+    wric_cat %in% "red" ~ 0,
+    wric_cat %in% "yellow" ~ 1,
+    wric_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(wbre_score=case_when(
+    wbre_cat %in% "red" ~ 0,
+    wbre_cat %in% "yellow" ~ 1,
+    wbre_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(wgra_score=case_when(
+    wgra_cat %in% "red" ~ 0,
+    wgra_cat %in% "yellow" ~ 1,
+    wgra_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(nut_score=case_when(
+    nut_cat %in% "red" ~ 0,
+    nut_cat %in% "yellow" ~ 2,
+    nut_cat %in% "green"~ 4
+  )) %>%
+  dplyr::mutate(nutb_score=case_when(
+    nutb_cat %in% "red" ~ 0,
+    nutb_cat %in% "yellow" ~ 1,
+    nutb_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(but_score=case_when(
+    but_cat %in% "red" ~ 0,
+    but_cat %in% "yellow" ~ 1,
+    but_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(oil_score=case_when(
+    oil_cat %in% "red" ~ 0,
+    oil_cat %in% "yellow" ~ 1,
+    oil_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(dha_score=case_when(
+    dha_cat %in% "red" ~ 0,
+    dha_cat %in% "yellow" ~ 1,
+    dha_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(pprot_score=case_when(
+    pprot_cat %in% "red" ~ 0,
+    pprot_cat %in% "yellow" ~ 1,
+    pprot_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(bean_score=case_when(
+    bean_cat %in% "red" ~ 0,
+    bean_cat %in% "yellow" ~ 2,
+    bean_cat %in% "green"~ 4
+  )) %>%
+  dplyr::mutate(milk_score=case_when(
+    milk_cat %in% "red" ~ 0,
+    milk_cat %in% "yellow" ~ 1,
+    milk_cat %in% "green"~ 2
+  )) %>% 
+  dplyr::mutate(chee_score=case_when(
+    chee_cat %in% "red" ~ 0,
+    chee_cat %in% "yellow" ~ 1,
+    chee_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(chip_score=case_when(
+    chip_cat %in% "red" ~ 0,
+    chip_cat %in% "yellow" ~ 1,
+    chip_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(ready_score=case_when(
+    ready_cat %in% "red" ~ 0,
+    ready_cat %in% "yellow" ~ 1,
+    ready_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(swee_score=case_when(
+    swee_cat %in% "red" ~ 0,
+    swee_cat %in% "yellow" ~ 1,
+    swee_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(ssb_score=case_when(
+    ssb_cat %in% "red" ~ 0,
+    ssb_cat %in% "yellow" ~ 1,
+    ssb_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(arti_score=case_when(
+    arti_cat %in% "red" ~ 0,
+    arti_cat %in% "yellow" ~ 1,
+    arti_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(alco_score=case_when(
+    alco_cat %in% "red" ~ 0,
+    alco_cat %in% "yellow" ~ 1,
+    alco_cat %in% "green"~ 2
+  )) %>%
+  dplyr::mutate(b12_score=case_when(
+    b12_cat %in% "green" ~ 4,
+    b12_cat %in% "red" ~ 0,
+  ))  %>%
+  dplyr::mutate(iod_score=case_when(
+    iod_cat %in% "green" ~ 2,
+    iod_cat %in% "red" ~ 0,
+  )) %>%
+  dplyr::mutate(vitd_score=case_when(
+    vitd_cat %in% "green" ~2,
+    vitd_cat %in% "red" ~0
+  )) %>%
+  dplyr::mutate(sel_score=case_when(
+    sel_cat %in% "green" ~ 2,
+    sel_cat %in% "red" ~ 0,
+  ))
+```
+
+```{r}
+write.table(df,"../../../Data/preprocessed/dietary/veganscreener_preprocessed_scores.tsv",sep="\t",row.names = FALSE)
+```
+
+```{r}
+df_scores <- df %>% select(ends_with("_score"),"VS_total") %>%
+  dplyr::select(-bdi_score)
+
+df_scores$calculated_vs <- rowSums(df_scores[,-29],na.rm = TRUE) 
+
+df_scores$VS_total
+```

@@ -42,19 +42,19 @@ Below is an overview of the folder structure:
   - `scripts/` - scripts for data analysis
 	- `preprocessing/` – data cleaning and integration of LC-MS and NMR datasets
 	- `custom_functions_vegans.R` – shared helper functions used across analysis scripts
-	- `VS_metabo_Figures.qmd` – generates main and supplementary figures
-	- `VS_metabo_overfitting_check.qmd` – label-shuffling check for model overfitting
-	- `VS_metabo_Q0.qmd` – metabolome vs. general covariates
-	- `VS_metabo_Q1.qmd` – metabolome vs. country
-	- `VS_metabo_Q1h.qmd` – metabolome vs. country, refined sub-analysis
-	- `VS_metabo_Q2.qmd` – metabolome vs. VEGANScreener score
-	- `VS_metabo_Q2minus.qmd` – metabolome vs. VGscore negative items
-	- `VS_metabo_Q2plus.qmd` – metabolome vs. VGscore positive items
-	- `VS_metabo_Q3_PDI.qmd` – metabolome vs. overall PDI
-	- `VS_metabo_Q3_hPDI.qmd` – metabolome vs. healthful PDI
-	- `VS_metabo_Q3_uDI.qmd` – metabolome vs. unhealthful PDI
-	- `VS_metabo_Q4_UPF.qmd` – metabolome vs. ultra-processed food intake
-	- `VS_metabo_Q5_PDIgroups.qmd` – metabolites vs. individual PDI food groups
+	- `VSmetabo_Figures.qmd` – generates main and supplementary figures
+	- `VSmetabo_overfitting_check.qmd` – label-shuffling check for model overfitting
+	- `VSmetabo_Q0.qmd` – metabolome vs. general covariates
+	- `VSmetabo_Q1.qmd` – metabolome vs. country
+	- `VSmetabo_Q1h.qmd` – metabolome vs. country, refined sub-analysis
+	- `VSmetabo_Q2.qmd` – metabolome vs. VEGANScreener score
+	- `VSmetabo_Q2minus.qmd` – metabolome vs. VGscore negative items
+	- `VSmetabo_Q2plus.qmd` – metabolome vs. VGscore positive items
+	- `VSmetabo_Q3_PDI.qmd` – metabolome vs. overall PDI
+	- `VSmetabo_Q3_hPDI.qmd` – metabolome vs. healthful PDI
+	- `VSmetabo_Q3_uDI.qmd` – metabolome vs. unhealthful PDI
+	- `VSmetabo_Q4_UPF.qmd` – metabolome vs. ultra-processed food intake
+	- `VSmetabo_Q5_PDIgroups.qmd` – metabolites vs. individual PDI food groups
 
   - `results` – results generated directly via provided scripts
 
@@ -75,32 +75,32 @@ Statistical analyses were conducted in R, combining exploratory correlation anal
 The code with reported results can be found:
 
 **Exploratory analysis**:
-- [Q0_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q0.html): metabolome vs. general covariates
+- [Q0_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q0.html): metabolome vs. general covariates
 
 **Country-related associations**:
-- [Q1_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q1.html): metabolome vs. country of residence
+- [Q1_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q1.html): metabolome vs. country of residence
 
 **Veganscreener evaluation**:
-- [Q2_analysis VEGANSCREENER](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q2.html): metabolome vs. overall VEGANScreener score
-- [Q2_analysis VEGANSCREENER (+)](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q2plus.html): metabolome vs. VGscore positive items
-- [Q2_analysis VEGANSCREENER (-)](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q2minus.html): metabolome vs. VGscore negative items
+- [Q2_analysis VEGANSCREENER](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q2.html): metabolome vs. overall VEGANScreener score
+- [Q2_analysis VEGANSCREENER (+)](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q2plus.html): metabolome vs. VGscore positive items
+- [Q2_analysis VEGANSCREENER (-)](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q2minus.html): metabolome vs. VGscore negative items
 
 **PDI evaluation**:
-- [Q3_analysis PDI](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q3_PDI.html): metabolome vs. overall PDI
-- [Q3_analysis hPDI](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q3_hPDI.html): metabolome vs. healthful PDI
-- [Q3_analysis uPDI](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q3_uPDI.html): metabolome vs. unhealthful PDI
+- [Q3_analysis PDI](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q3_PDI.html): metabolome vs. overall PDI
+- [Q3_analysis hPDI](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q3_hPDI.html): metabolome vs. healthful PDI
+- [Q3_analysis uPDI](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q3_uPDI.html): metabolome vs. unhealthful PDI
 
 **UPF evaluation**:
-- [Q4_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q4_UPF.html): metabolome vs. ultra-processed food intake
+- [Q4_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q4_UPF.html): metabolome vs. ultra-processed food intake
 
 **PDI groups**:
-- [Q5_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Q5_PDIgroups.html): metabolites vs. individual PDI food groups
+- [Q5_analysis](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Q5_PDIgroups.html): metabolites vs. individual PDI food groups
 
 **ML overfitting check**:
-- [ML_overfitting_check](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_overfitting_check.html): label-shuffling validation of RF model performance
+- [ML_overfitting_check](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_overfitting_check.html): label-shuffling validation of RF model performance
 
 **Figures included in the original publication**:
-- [Figures](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VS_metabo_Figures.html): code generating the manuscript's main and supplementary figures
+- [Figures](https://github.com/xpolak37/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Figures.html): code generating the manuscript's main and supplementary figures
 
 
 ---------------------------------------------------------------------------------------------------

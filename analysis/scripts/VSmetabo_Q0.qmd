@@ -1,0 +1,449 @@
+---
+title: "VEGANScreener + metabolomics"
+subtitle: "Q0: Associations of metabolome profile with various external variables."
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+**This code is used to explore patterns in the metabolome profiles of vegans.**
+
+In the very first part of analysis (Q0), the general plots generated from the studied cohort are shown:
+
+- descriptive statistics
+
+- PCA, color-coded according to different external variables
+
+- correlations of individual PCs with different external variables
+
+
+```{r,echo=FALSE}
+source("custom_functions_vegans.R")
+```
+
+# Import
+
+```{r}
+metadata_df <- read.table(
+  file = "../../data/preprocessed/metadata_preprocessed_v3.tsv", 
+  header = TRUE)
+
+spca_integrated_df <-  read.table(
+  file = "../../data/preprocessed/metabolomics/spca_integrated_vegans_INT_v3.tsv",
+  check.names = FALSE)
+
+pdi_df <- read.table(
+  file = "../../data/preprocessed/dietary/pdi/pdi_avg_residuals_scaled_v3.tsv",
+  check.names = FALSE,
+  header = TRUE) %>% 
+  dplyr::select(study_id,pdi_an_avg,hpdi_an_avg,updi_an_avg)
+
+metadata_df <- merge(metadata_df,pdi_df,by = "study_id",all.x = TRUE)
+```
+
+**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 1.
+
+```{r}
+metadata_scaled_df <- metadata_df
+metadata_scaled_df[,-c(1,3,5,6,8)] <- apply(metadata_df[,-c(1,3,5,6,8)],2,scale)
+metadata_scaled_df <- metadata_scaled_df %>%
+  mutate(sex=as.factor(sex),
+         country=as.factor(country),
+         group=as.factor(group),
+         diet_supplements=as.factor(diet_supplements))
+```
+
+# Descriptive statistics
+
+Summary of counts per diet group, country and sex:
+
+```{r}
+metadata_df %>% dplyr::group_by(country,sex) %>% count()
+```
+
+Basic plots for visualizing the distribution of selected variables:
+
+```{r,fig.width=15,fig.height=10,warning=FALSE}
+plot_list <- list()
+name <- c("Age (years)","BMI","Vegan diet duration (years)","VS_total",
+          "VS_total_plus","VS_total_minus",
+          "UPF [%]",
+          "PDI","hPDI","uPDI")
+i <- 1
+for (col in c("age","bmi","vegan_duration","VS_total","UPF_perc_avg",
+              "pdi_an_avg","hpdi_an_avg","updi_an_avg")){
+  p <- ggplot(metadata_df) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(metadata_df[,col],na.rm = TRUE),2),"+-", round(sd(metadata_df[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+i <- 1
+name <- c("Sex","Country","Supplementation")
+for (col in c("sex","country","diet_supplements")){
+  p <- ggplot(metadata_df) +
+        theme_minimal() + 
+     theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          axis.text.x=element_text(angle = 45,hjust = 1)) +
+    stat_count(aes(x=!!sym(col)),fill="darkblue") + 
+    xlab(name[i]) +
+  geom_text(data=metadata_df %>% 
+              dplyr::group_by(!!sym(col)) %>% count() %>%
+              dplyr::mutate(n=n+10), aes(x=!!sym(col),y=n,label=n))
+  
+  plot_list[[length(plot_list)+1]] <- p
+                 
+  i <- i+1                           
+}
+
+wrap_plots(plot_list)
+
+```
+
+# Table 1
+
+Generating Table 1 (Baseline characteristics of the study participants.)
+
+```{r}
+# Define variables
+continuous_vars <- c("age", "bmi", "vegan_duration", 
+                     "VS_total","VS_total_plus","VS_total_minus",
+                     "pdi_an_avg","hpdi_an_avg","updi_an_avg", "UPF_perc_avg")
+
+categorical_vars <- c("sex", "diet_supplements")  # add more if needed
+
+# Optional: stratify by country
+strata_var <- "country"  # set to NULL if not stratifying
+
+# Overall (non-stratified)
+table_overall <- CreateTableOne(vars = c(continuous_vars, categorical_vars),
+                                data = metadata_df,
+                                factorVars = categorical_vars,
+                                test = FALSE)
+
+# Stratified by country
+table_strat <- CreateTableOne(vars = c(continuous_vars, categorical_vars),
+                              strata = strata_var,
+                              data = metadata_df,
+                              factorVars = categorical_vars,
+                              test = FALSE)
+
+# Combine into one table for display
+# Extract as data frames
+df_overall <- print(table_overall, showAllLevels = TRUE, quote = FALSE, noSpaces = TRUE, printToggle = FALSE)
+df_strat <- print(table_strat, showAllLevels = TRUE, quote = FALSE, noSpaces = TRUE, printToggle = FALSE)
+
+# Combine overall + stratified
+table_final <- cbind(Overall = df_overall, df_strat)
+
+# Display 
+knitr::kable(table_final, caption = "Table 1. Baseline characteristics of study participants")
+```
+
+```{r}
+write.xlsx(table_final,"../results/vegan/Table1.xlsx",rowNames=TRUE)
+```
+
+```{r}
+skim(metadata_df)
+```
+
+# Metabolites
+
+```{r}
+lcms_df <- read.table(
+  file = "../../data/preprocessed/metabolomics/lc_ms_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+nmr_df <- read.table(
+  file = "../../data/preprocessed/metabolomics/nmr_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+common_samples <- Reduce(intersect, 
+                         list(rownames(lcms_df),
+                              rownames(nmr_df),
+                              metadata_df$study_id))
+
+lcms_df <- lcms_df[common_samples,]
+nmr_df <- nmr_df[common_samples,]
+
+dim(lcms_df)
+dim(nmr_df)
+```
+
+# PERMANOVA
+
+Testing each individual variable to see how much variance they explain in serum metabolome profile. 
+
+```{r}
+vars_to_test <- c("sex","bmi", "age", "VS_total","VS_total_plus","VS_total_minus", "vegan_duration","country", "diet_supplements","UPF_perc_avg","pdi_an_avg","hpdi_an_avg",
+                  "updi_an_avg")
+
+adonis_result_all <- data.frame(Var=NA,
+                                Df=NA,
+                                SumOfSqs=NA,
+                                R2=NA,
+                                `F`=NA,
+                                `Pr(>F)`=NA,
+                                check.names = FALSE)
+for (var in vars_to_test){
+  metadata_sub_df <- metadata_scaled_df %>% dplyr::select(all_of(c("study_id",var))) %>% drop_na()
+  sub_spca <- spca_integrated_df[as.character(metadata_sub_df$study_id),]
+  
+  # Create Euclidean distance matrix
+  dist_mat <- vegdist(sub_spca, 
+                    method = "euclidean")
+  
+  # Test 
+  set.seed(123)
+  adonis_result <- adonis2(
+  as.formula(paste0("dist_mat ~ ", var)),
+  data = metadata_sub_df , 
+  permutations = 999,
+  by="margin")
+
+  adonis_result_all <- rbind(adonis_result_all,as.data.frame(adonis_result)[1,] %>% 
+                               rownames_to_column("Var"))
+}
+
+
+adonis_result_all$adjusted_p <- p.adjust(adonis_result_all$`Pr(>F)`,method = "BH")
+
+adonis_result_all <- adonis_result_all[-1,]
+print(adonis_result_all)
+```
+
+```{r,fig.height=4,fig.width=9}
+# Significance grouping
+adonis_result_all$significance <- ifelse(
+  adonis_result_all$adjusted_p < 0.05, "Significant", "Not significant"
+)
+
+# Order by R2 ascending (so largest appears at top in coord_flip)
+adonis_result_all$Var <- factor(
+  adonis_result_all$Var,
+  levels = adonis_result_all$Var[order(adonis_result_all$R2)]
+)
+
+# Plot
+p <- ggplot(adonis_result_all, aes(x = Var, y = R2 * 100, fill = significance)) +
+  geom_col(width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(
+    values = c("Significant" = "#1D9E75", "Not significant" = "#B4B2A9"),
+    name = "PERMANOVA"
+  ) +
+  scale_y_continuous(
+    labels = function(x) paste0(x, "%"),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  labs(
+    x = NULL,
+    y = "Variance explained (R², %)"
+  ) 
+
+p <- ggtheme(p) + 
+  theme(axis.text.x = element_text(face="bold",size=15),
+        axis.text.y = element_text(face="bold",size=15),
+        panel.grid.major.x = element_line(color = "grey90", linewidth = 0.4),
+        title = element_text(face="bold",size=15),
+        legend.position = "bottom") + scale_x_discrete(labels = c("country" = "Country",
+                                  "VS_total" = "VEGANScreener score",
+                                  "sex" = "Sex",
+                                  "UPF_perc_avg" = "UPF",
+                                  "age" = "Age",
+                                  "bmi" = "BMI",
+                                  "diet_supplements" = "Supplementation",
+                                  "vegan_duration" = "Vegan duration",
+                                  "pdi_an_avg" = "PDI"
+                                  ))
+
+p
+```
+
+```{r}
+f <- p
+save(f,file="../results/vegan/figures/F2a_permanovaVar.RData")
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q0/R2_permanova.pdf",height = 4,width = 9)
+p
+dev.off()
+```
+
+# Correlations with PCs
+
+The SPCA dataset was created by concatenating LCMS and NMR dataset and applying Mixomics::spca() function. See preprocessing script for details. 
+
+mixOmics::spca() performs **Sparse Principal Component Analysis**, which is similar to regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
+This sparsity is controlled by penalization, making interpretation easier because irrelevant or noisy variables get loadings of zero.
+
+```{r}
+metadata_analysis_df <- metadata_df %>% 
+  dplyr::select(study_id, VS_total,VS_total_plus,VS_total_minus, age, bmi, sex, country, 
+                vegan_duration, diet_supplements,UPF_perc_avg,pdi_an_avg,hpdi_an_avg,updi_an_avg) %>%
+  column_to_rownames("study_id")
+
+cor_results <- corr_with_pcs(spca_integrated_df,metadata_analysis_df)
+
+### Filter significant correlations (p < 0.05)
+df_sig <- cor_results %>% 
+  filter(is.finite(rho), pvalue < 0.05)
+df_sig$var1 <- factor(df_sig$var1, levels = names(spca_integrated_df))
+```
+
+Generated plot below shows Spearman correlations of individual PCs from sPCA metabolome dataset with various external variables. The most strongest associations can be seen with **sex**, individual **countries**, **VS_total** and **bmi**. These variables, will be explored in more details in other scripts.  
+
+The strongest signal can be seen in individual **countries**, **VS_total** and **sex**. 
+
+```{r,fig.height=7,fig.width=12}
+meta_order <- df_sig %>%
+  group_by(var2) %>%
+  dplyr::summarize(max_abs_rho = max(sum(abs(rho)), na.rm = TRUE)) %>%
+  arrange((max_abs_rho)) %>%
+  pull(var2)
+
+meta_order <- c(levels(adonis_result_all$Var)[-length(adonis_result_all$Var)],
+                "country_ES","country_DE","country_CH","country_BE",
+                "country_CZ")
+
+df_sig$var2 <- factor(df_sig$var2, levels = meta_order)
+
+p <- ggplot(df_sig, aes(x = var1, y = var2, fill = rho)) +
+  geom_point(shape = 21,size=8,color="white") +
+  scale_fill_gradient2(
+    
+    low = "darkblue",mid = "white",high = "darkred", midpoint = 0, name = "Spearman correlation",limits = c(-1, 1)) +
+  labs(
+    x = "",
+    y = "",
+    title = "Key Variable Associations with Metabolome PCs") 
+
+p <- ggtheme(p) + 
+  theme(axis.text.x = element_text(face="bold",size=15,angle=45,hjust=1),
+        axis.text.y = element_text(face="bold",size=15),
+        title = element_text(face="bold",size=15),
+        legend.position = "bottom")
+
+p
+```
+
+```{r}
+f <- p
+save(f,file="../results/vegan/figures/F2b_PcaCorr.RData")
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q0/pca_corr_main_covariates.pdf",height = 6,width = 9)
+p
+dev.off()
+```
+
+
+# PCA and colored metadata
+
+The strongest pattern is seen with **sex** variable, as was evident in the correlation plot above. 
+
+**PC1 vs PC2**
+
+```{r,fig.width=20,fig.height=15}
+plot_list <- list()
+for (col in c("sex","country","age","bmi","VS_total","vegan_duration","UPF_perc_avg","pdi_an_avg")){
+  p <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = col,
+              perform_pca = FALSE) 
+
+  p <- ggtheme(p)
+  
+  plot_list[[length(plot_list)+1]] <- p 
+}
+
+
+a12 <- wrap_plots(plot_list)
+```
+
+**PC1 vs PC3**
+
+```{r,fig.width=20,fig.height=15}
+plot_list <- list()
+for (col in c("sex","country","age","bmi","VS_total","vegan_duration","UPF_perc_avg","pdi_an_avg")){
+  p <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = col,
+              perform_pca = FALSE,
+              axis=c("PC1","PC3")) 
+
+  p <- ggtheme(p)
+  
+  plot_list[[length(plot_list)+1]] <- p 
+}
+
+
+a13 <- wrap_plots(plot_list)
+```
+
+**PC2 vs PC3**
+
+```{r,fig.width=20,fig.height=15}
+plot_list <- list()
+for (col in c("sex","country","age","bmi","VS_total","vegan_duration","UPF_perc_avg","pdi_an_avg")){
+  p <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = col,
+              perform_pca = FALSE,
+              axis=c("PC2","PC3")) 
+
+  p <- ggtheme(p)
+  plot_list[[length(plot_list)+1]] <- p 
+}
+
+
+a23 <- wrap_plots(plot_list)
+```
+
+```{r,fig.width=10,fig.height=5}
+a12
+a13
+a23
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q0/pca_main_covariates.pdf",height = 5,width = 10)
+a12
+a13
+a23
+dev.off()
+```

@@ -29,9 +29,9 @@ project:
 fontsize: 12 px
 ---
 
-**This code serves to explore patterns in the metabolome profile of vegans, especially distinguishing different countries of origin.**
+**This code is used to explore patterns in the metabolome profiles of vegans, particularly to distinguish between different countries of origin.**
 
-The script is divided into two parts, according to the integration method of metabolome datasets (see preprocessing scripts for details). At first, the **sPCA dataset** is analyzed. This dataset is used for multivariate analysis, PCA visualization, PERMANOVA and ML approach. The **concatenated dataset** of both LCMS and NMR is used for univariate analysis. 
+The script is divided into two parts, according to the integration method of the metabolome datasets (see preprocessing scripts for details). At first, the **sPCA dataset** is analyzed. This dataset is used for multivariate analysis, visualization, PERMANOVA testing and ML approach. The **concatenated dataset** of both LCMS and NMR is used for the univariate analysis - linear modelling with a visualization thorugh the bipartite graphs. 
 
 The main parts of the analysis is composed of:
 
@@ -41,14 +41,13 @@ The main parts of the analysis is composed of:
   dist(Metabolome) \~ sex + bmi + age + VS_total + veganDuration + country
 
 3.  Univariate analysis (feature-wise model) - linear modelling of metabolite using various external variables:
-  Metabolite \~  sex + bmi + age + VS_total + veganDuration + Country
+  Metabolite \~  sex + bmi + age + VS_total + veganDuration + country
   
-Individual means and p values are obtained by the emmeans() function. The bipartite network is then constructed and clusters by Louvain method. 
+Individual means and p-values are obtained by the emmeans() function. The bipartite network is then constructed and color-coded based on the strongest association to the analyzed factor.
 
-4.  RF classification - the model is trained and validated through bootstrapping. The RF model is used to distinguish country of origin.
+4.  Random forest (RF) classification - the model is trained and validated through bootstrapping with 500 iterations. The RF model is used to distinguish country of origin. The two types of models are trained:
 a) ML model on original sPCA dataset
 b) ML model on sPCA dataset after regressing out the covariates.
-
 
 ```{r,echo=FALSE}
 source("custom_functions_vegans.R")
@@ -57,36 +56,35 @@ source("custom_functions_vegans.R")
 # Import
 
 ```{r}
-metadata_df <- read.table("../../data/preprocessed/dietary/veganscreener_preprocessed.tsv",
-                          header = TRUE)  %>%
-                dplyr::filter(eq_included_group=="vegan")
+metadata_df <- read.table(
+  file = "../../data/preprocessed/metadata_preprocessed_v3.tsv", 
+  header = TRUE) %>%
+  dplyr::filter(group=="VG")
 
-lcms_df <- read.table("../../data/preprocessed/metabolomics/lc_ms_preprocessed.tsv",check.names = FALSE)
-nmr_df <- read.table("../../data/preprocessed/metabolomics/nmr_preprocessed.tsv",check.names = FALSE)
-spca_integrated_df <-  read.table("../../data/preprocessed/metabolomics/spca_integrated_all.tsv",
-                                  check.names = FALSE)
+lcms_df <- read.table(
+  file = "../../data/preprocessed/metabolomics/lc_ms_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+nmr_df <- read.table(
+  file = "../../data/preprocessed/metabolomics/nmr_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+spca_integrated_df <-  read.table(
+  file = "../../data/preprocessed/metabolomics/spca_integrated_vegans_INT_v3.tsv",
+  check.names = FALSE)
 ```
 
-Remove outliers (other sex, bmi < 15)
+
+**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
 
 ```{r}
-metadata_df <- metadata_df %>% dplyr::filter(bmi>15,sex != "OTHER")
-```
-
-**Get only important samples**
-
-```{r}
-# metabolomics
-common_samples <- Reduce(intersect, list(rownames(lcms_df),
-                                     rownames(nmr_df), 
-                                     rownames(spca_integrated_df),
-                                     metadata_df$study_id))
-
-lcms_df <- lcms_df[common_samples,]
-nmr_df <- nmr_df[common_samples,]
-spca_integrated_df <- spca_integrated_df[as.character(common_samples),]
-metadata_df <- metadata_df %>% dplyr::filter(study_id %in% common_samples)
-
+metadata_scaled_df <- metadata_df
+metadata_scaled_df[,-c(1,3,5,6,8)] <- apply(metadata_df[,-c(1,3,5,6,8)],2,scale)
+metadata_scaled_df <- metadata_scaled_df %>%
+  mutate(sex=as.factor(sex),
+         country=as.factor(country),
+         group=as.factor(group),
+         diet_supplements=as.factor(diet_supplements))
 ```
 
 # Descriptive statistics
@@ -94,16 +92,16 @@ metadata_df <- metadata_df %>% dplyr::filter(study_id %in% common_samples)
 Summary of counts per diet group, country and sex:
 
 ```{r}
-metadata_df %>% dplyr::group_by(Country,sex) %>% count()
+metadata_df %>% dplyr::group_by(country,sex) %>% count()
 ```
 
 Basic plots for visualizing the distribution of selected variables:
 
-```{r,fig.width=10,fig.height=7}
+```{r,fig.width=10,fig.height=5}
 plot_list <- list()
 name <- c("Age (years)","BMI","Vegan diet duration (years)","VS_total")
 i <- 1
-for (col in c("age","bmi","eq_vegan_dur_total","VS_total")){
+for (col in c("age","bmi","vegan_duration","VS_total")){
   p <- ggplot(metadata_df) + 
     geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
     theme_minimal() + 
@@ -119,7 +117,7 @@ for (col in c("age","bmi","eq_vegan_dur_total","VS_total")){
 }
 i <- 1
 name <- c("Sex","Country")
-for (col in c("sex","Country")){
+for (col in c("sex","country")){
   p <- ggplot(metadata_df) +
         theme_minimal() + 
      theme(axis.title = element_text(face="bold",size=20),
@@ -127,7 +125,8 @@ for (col in c("sex","Country")){
     stat_count(aes(x=!!sym(col)),fill="darkblue") + 
     xlab(name[i]) +
   geom_text(data=metadata_df %>% 
-              dplyr::group_by(!!sym(col)) %>% count(), aes(x=!!sym(col),y=n+10,label=n))
+              dplyr::group_by(!!sym(col)) %>% count() %>%
+              dplyr::mutate(n=n+10), aes(x=!!sym(col),y=n,label=n))
   
   plot_list[[length(plot_list)+1]] <- p
                  
@@ -142,25 +141,10 @@ wrap_plots(plot_list)
 
 The SPCA dataset was created by concatenating LCMS and NMR dataset and applying Mixomics::spca() function. See preprocessing script for details. 
 
-mixOmics::spca() performs **Sparse Principal Component Analysis**, which is like regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
+mixOmics::spca() performs **Sparse Principal Component Analysis**, which is similar to regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
 This sparsity is controlled by penalization, making interpretation easier because irrelevant or noisy variables get loadings of zero.
 
 ## Visualization
-
-### UMAP
-
-```{r}
-p <- umap_plot(spca_integrated_df,metadata_df,color_col = "Country",
-          neighbors = 10,min_dist = 0.1)
-
-p
-```
-
-```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q1_country/umap.pdf",height = 4,width = 6)
-p
-dev.off()
-```
 
 ### PCA
 
@@ -171,12 +155,15 @@ spca_plot_df <- merge(
 
 p <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "Country",
+              color_col = "country",
               perform_pca = FALSE)
 
 p <- ggtheme(p)
 
 p
+
+p_pca <- list()
+p_pca[[1]] <- p
 ```
 
 ```{r,echo=FALSE}
@@ -192,21 +179,21 @@ spca_plot_df <- merge(
 
 p1 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "Country",
+              color_col = "country",
               perform_pca = FALSE,axis = c("PC1","PC2"))
 
 p1 <- ggtheme(p1)
 
 p2 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "Country",
+              color_col = "country",
               perform_pca = FALSE,axis = c("PC2","PC3"))
 
 p2 <- ggtheme(p2)
 
 p3 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "Country",
+              color_col = "country",
               perform_pca = FALSE,axis = c("PC1","PC3"))
 
 p3 <- ggtheme(p3)
@@ -222,88 +209,16 @@ plot_layout(guides = "collect")
 dev.off()
 ```
 
-**PC1 vs PC2**
-
-```{r,fig.width=10}
-plot_list <- list()
-for (col in c("Country","sex","age","bmi","VS_total","eq_vegan_dur_total")){
-  p <- pca_plot(spca_integrated_df,
-              metadata_df,
-              color_col = col,
-              perform_pca = FALSE) 
-
-  p <- ggtheme(p)
-  
-  plot_list[[length(plot_list)+1]] <- p 
-}
-
-
-a12 <- wrap_plots(plot_list)
-```
-
-**PC1 vs PC3**
-
-```{r,fig.width=10}
-plot_list <- list()
-for (col in c("Country","sex","age","bmi","VS_total","eq_vegan_dur_total")){
-  p <- pca_plot(spca_integrated_df,
-              metadata_df,
-              color_col = col,
-              perform_pca = FALSE,
-              axis=c("PC1","PC3")) 
-
-  p <- ggtheme(p)
-  
-  plot_list[[length(plot_list)+1]] <- p 
-}
-
-
-a13 <- wrap_plots(plot_list)
-```
-
-**PC2 vs PC3**
-
-```{r,fig.width=10}
-plot_list <- list()
-for (col in c("Country","sex","age","bmi","VS_total","eq_vegan_dur_total")){
-  p <- pca_plot(spca_integrated_df,
-              metadata_df,
-              color_col = col,
-              perform_pca = FALSE,
-              axis=c("PC2","PC3")) 
-
-  p <- ggtheme(p)
-  plot_list[[length(plot_list)+1]] <- p 
-}
-
-
-a23 <- wrap_plots(plot_list)
-```
-
-```{r,fig.width=10,fig.height=5}
-a12
-a13
-a23
-```
-
-```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q1_country/pca_main_covariates.pdf",height = 5,width = 10)
-a12
-a13
-a23
-dev.off()
-```
-
 ### Boxplots
 
 ```{r,fig.height=15,fig.width=20}
 spca_for_uni <- merge(spca_integrated_df %>% rownames_to_column("study_id"),
-                      metadata_df,by="study_id",all = TRUE) 
+                      metadata_scaled_df,by="study_id",all = TRUE) 
 
 plot_list <- list()
 for (col in colnames(spca_integrated_df)){
   p <- ggplot(spca_for_uni, 
-              aes_string(x = "Country",y = col,fill="Country")) +
+              aes_string(x = "country",y = col,fill="country")) +
     geom_boxplot() +
     ggtitle(col) + 
     theme_minimal() + 
@@ -315,7 +230,7 @@ for (col in colnames(spca_integrated_df)){
       CH = "#D52B1E"    # red
     )) + 
     geom_signif(comparisons = 
-                  combn(as.character(unique(spca_for_uni$Country)),
+                  combn(as.character(unique(spca_for_uni$country)),
                         m=2, simplify = FALSE),
                 map_signif_level = TRUE, step_increase = 0.1,textsize = 2)
   
@@ -350,13 +265,13 @@ country_colors <- c(
 
 p_df <- spca_integrated_df %>% t()
 
-ann_df <- metadata_df %>% dplyr::select(study_id,Country) %>%
+ann_df <- metadata_df %>% dplyr::select(study_id,country) %>%
   column_to_rownames("study_id")
 
 ann_colors <- list(
-  "Country"=country_colors
+  "country"=country_colors
 )
-names(ann_colors[["Country"]]) <- names(country_colors)
+names(ann_colors[["country"]]) <- names(country_colors)
 
 p <- pheatmap(p_df,cluster_rows = FALSE,show_colnames = FALSE,
               annotation_col = ann_df,
@@ -373,268 +288,65 @@ dev.off()
 
 ## PERMANOVA
 
-The test show how much of the variation in metabolomics is explained by: - sex - age - bmi - VS total - vegan duration - Country
+The test shows how much of the variation in metabolomics is explained by: sex - age - bmi - VS total - vegan duration - Country
 
 Variables were added sequentially (Type I SS), so each p-value and R² reflects a partial effect, after adjusting for those above. This model accounts for variation due to sex, age, vegan diet duration and BMI. Then accounts for the main effects of country. 
 
-----------------------
-
-Country explains **9.6%** of variation after adjusting for sex, age, bmi, VS_total and duration of the diet. This result is statistically significant (p<0.001).
+Country explains **9.02%** of variation after adjusting for sex, age, bmi, VS_total and duration of the diet. This result is statistically significant (p<0.001).
 
 ```{r}
+metadata_to_test <- metadata_scaled_df %>% drop_na(VS_total,vegan_duration)
+
 # Create Euclidean distance matrix
 dist_mat <- vegdist(spca_integrated_df, 
                     method = "euclidean")
 
-# Test whether vegan vs omnivore differ in metabolomics
+# Test whether countries differ in metabolomics
 adonis_result <- adonis2(
-  dist_mat ~ sex + bmi + age + VS_total + eq_vegan_dur_total + Country,
-  data = metadata_df , 
+  dist_mat ~ sex + bmi + age + VS_total + vegan_duration + country,
+  data = metadata_scaled_df , 
   permutations = 999,
   by="terms")
 
 print(adonis_result)
 ```
 
-## Univariate analysis
+```{r,fig.width=6,fig.height=2}
+adonis_result <- adonis_result[-8,] %>% rownames_to_column("Var")
+adonis_result$Var <- factor(adonis_result$Var,levels = rev(c("sex","age","bmi","VS_total", "vegan_duration","country", "Residual")))
+p <- ggplot(adonis_result, aes(fill=Var, x=R2, y="Metabolome")) + 
+    geom_bar(position="stack", stat="identity") + 
+  ylab("") + xlab("Partial variance explained (R²)") + 
+  scale_fill_manual(values=rev(c("#ffffcc","#b3cde3","#ccebc5",
+                                 "#decbe4","#fed9a6","darkred",
+                                 "lightgrey")),name = "Covariate")  
 
-Here, the density plot is shown to gather a basic understanding of individual metabolites (in this case PCs) when comparing the country of origin. Next, the lm model is used to test the differences in countries, while adjusting for covariates.
-
-### Density plot
-
-```{r,fig.height=10,fig.width=20}
-spca_for_uni <- merge(spca_integrated_df %>% rownames_to_column("study_id"),
-                      metadata_df,by="study_id",all = TRUE) 
-
-plot_list <- list()
-for (col in colnames(spca_integrated_df)){
-  p <- ggplot(spca_for_uni, 
-              aes_string(x = col,fill="Country")) +
-    geom_density(alpha = 0.5) +
-    ggtitle(col) + 
-    theme_minimal()
-  
-  plot_list[[length(plot_list) + 1]] <- p
-}
-
-
-a <- wrap_plots(plot_list)
-
-a
-```
-
-```{r,echo=FALSE}
-pdf("../results/vegan/Q1_country/pca_density.pdf",height = 10,width = 20)
-a
-dev.off()
-```
-
-### Network analysis
-
-**LM**
-
-```{r}
-results_list <- lapply(colnames(spca_integrated_df), 
-                       function(x) fit_netglm(x,spca_for_uni,
-                                           tested_variable = "Country"))
-results_df <- do.call(rbind, results_list)
-
-country_effects <- results_df %>%
-  dplyr::mutate(p_adj = p.adjust(`p.value`, method = "BH"))
-
-```
-
-**Edge list**
-
-```{r}
-edges <- country_effects %>%
-  filter(p_adj < 0.05) %>%
-  select(from = Country, to = metabolite, 
-         emmean = emmean) %>%
-  mutate(from=as.character(from),
-         weight=abs(emmean))
-
-edges$from <- as.character(edges$from)
-edges$to   <- as.character(edges$to)
-```
-
-**Nodes table**
-
-```{r}
-
-countries <- as.character(unique(edges$from))
-metabs <- as.character(unique(edges$to))
-
-nodes <- data.frame(
-  name = c(countries, metabs),
-  type = c(rep(TRUE, length(countries)), rep(FALSE, length(metabs))) # TRUE = country, FALSE = metabolite
-)
-```
-
-**Build igraph object**
-
-```{r}
-g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
-```
-
-**Visualize**
-
-```{r}
-country_colors <- c(
-  BE = "#FDDA24",  # gold
-  CZ = "#11457E",  # blue
-  DE = "#000000",  # black
-  ES = "#630356",  # purple
-  CH = "#D52B1E"   # red
-)
-
-# Assign colors to nodes: countries get their color, metabolites gray
-V(g)$color <- ifelse(V(g)$type,
-                     country_colors[V(g)$name],
-                     "gray70")
-```
-
-```{r}
-ggraph(g, layout = "fr") +
-  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
-  scale_edge_color_manual(values = c("lightblue", "lightpink"), labels = c("<0", ">0")) +
-  geom_node_point(aes(shape=type,color = name), size = 6) +
-  scale_color_manual(values = setNames(V(g)$color, V(g)$name)) +  # node colors
-  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
-  theme_void() +
-  guides(color = "none")
-
-```
-#### Louvain clustering
-
-**Based on positive associations**
-
-```{r}
-edges_pos <- edges %>%
-  filter(emmean > 0)  # keep only positive associations
-
-g_pos <- graph_from_data_frame(
-  d = edges_pos, 
-  vertices = nodes, 
-  directed = FALSE)
-
-country_colors <- c(
-  BE = "#FDDA24",  # gold
-  CZ = "#11457E",  # blue
-  DE = "#000000",  # black
-  ES = "#630356",  # purple
-  CH = "#D52B1E"   # red
-)
-
-# Assign colors to nodes: countries get their color, metabolites gray
-V(g_pos)$color <- ifelse(V(g_pos)$type,
-                     country_colors[V(g_pos)$name],
-                     "gray70")
-
-cl_pos <- cluster_louvain(g_pos)
-groups <- communities(cl_pos)  
-membership_df <- data.frame(
-  vertex = names(membership(cl_pos)),
-  cluster = membership(cl_pos)
-)
-membership_df
-```
-
-```{r}
-g_country_colors <- country_colors[c(1,2,5,4)]
-g_country_colors <- c(g_country_colors,rep("gray70",10))
-g2_country_colors <- g_country_colors
-g2_country_colors["CZ"] <- "#000000"
-V(g_pos)$fill <- g_country_colors[membership_df$cluster]
-V(g_pos)$color <- g2_country_colors[membership_df$cluster]
-```
-
-
-```{r}
-set.seed(123)
-p <- ggraph(g_pos, layout = "fr") +
-  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
-  scale_edge_color_manual(values = c("lightpink"), labels = c(">0")) +
-  geom_node_point(aes(size=type,color = name,fill=name),shape=21,stroke=1.2) +
-  scale_color_manual(values = setNames(V(g_pos)$color, V(g_pos)$name))   + # node colors
-scale_fill_manual(values = setNames(V(g_pos)$fill, V(g_pos)$name)) +  # node fill
-  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
-  theme_void() + 
-  theme(legend.position = "none")
+p <- ggtheme(p)
 
 p
+
+p_pca[[2]] <- p
+p_pca[[3]] <- adonis_result
 ```
 
-```{r,echo=FALSE}
-pdf("../results/vegan/Q1_country/network_pca_pos.pdf",height = 4,width = 6)
-p
-dev.off()
-```
-
-**Based on negative associations**
+**Pairwise PERMANOVA**
 
 ```{r}
-edges_neg <- edges %>%
-  filter(emmean < 0)  # keep only negative associations
-
-g_neg <- graph_from_data_frame(
-  d = edges_neg, 
-  vertices = nodes, 
-  directed = FALSE)
-
-country_colors <- c(
-  BE = "#FDDA24",  # gold
-  CZ = "#11457E",  # blue
-  DE = "#000000",  # black
-  ES = "#630356",  # purple
-  CH = "#D52B1E"   # red
-)
-
-# Assign colors to nodes: countries get their color, metabolites gray
-V(g_neg)$color <- ifelse(V(g_neg)$type,
-                     country_colors[V(g_neg)$name],
-                     "gray70")
-
-cl_neg <- cluster_louvain(g_neg)
-groups <- communities(cl_neg)  
-membership_df <- data.frame(
-  vertex = names(membership(cl_neg)),
-  cluster = membership(cl_neg)
-)
-membership_df
+pp_main <- pairwise.adonis(x = t(spca_integrated_df),
+                metadata = metadata_scaled_df %>%
+                  dplyr::mutate(SampleID=study_id),
+                formula = "dist_mat ~ sex + bmi + age + VS_total + vegan_duration + country",main_variable = "country",
+                sim.method = "euclidean"
+                  )
 ```
 
 ```{r}
-g_country_colors <- country_colors[c(1,2,3,5,4)]
-g_country_colors <- c(g_country_colors,rep("gray70",10))
-V(g_neg)$fill <- g_country_colors[membership_df$cluster]
-V(g_neg)$color <- g_country_colors[membership_df$cluster]
+pp_main
 ```
-
-
-```{r}
-set.seed(123)
-p <- ggraph(g_neg, layout = "fr") +
-  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
-  scale_edge_color_manual(values = c("lightblue"), labels = c("<0")) +
-  geom_node_point(aes(size=type,color = name,fill=name),shape=21,stroke=1.2) +
-  scale_color_manual(values = setNames(V(g_neg)$color, V(g_neg)$name))   + # node colors
-scale_fill_manual(values = setNames(V(g_neg)$fill, V(g_neg)$name)) +  # node fill
-  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
-  theme_void() + 
-  theme(legend.position = "none")
-
-p 
-```
-
-```{r,echo=FALSE}
-pdf("../results/vegan/Q1_country/network_pca_neg.pdf",height = 4,width = 6)
-p
-dev.off()
-```
-
 
 ## RF model
+
+Model performance significance was assessed using a bootstrap-based z-test. The AUC was estimated over 500 bootstrap resamples, and the bootstrap standard error was used to compute a Wald-type statistic z = (A − 0.5)/SE, with p-values obtained from the standard normal distribution.
 
 ### Original model
 
@@ -643,7 +355,7 @@ model_name <- "country_model_vegan"
 
 prepared_df <- model_preparation(spca_integrated_df,
                                  metadata_df,
-                                 predicting_col = "Country")
+                                 predicting_col = "country")
 
 rf_model <- make_rf_model(data=prepared_df,
                           outcome="Group",
@@ -651,11 +363,20 @@ rf_model <- make_rf_model(data=prepared_df,
                           file = model_name,
                           reuse=TRUE)
 
+rf_model$model_summary
 roc_c <- roc_curve(model_object = rf_model,CI = TRUE)
 
 roc_c <- ggtheme(roc_c)
 
 roc_c
+```
+
+**Accuracy**
+
+```{r}
+mean((rf_model$predictions %>%
+  dplyr::group_by(iteration) %>%
+  dplyr::summarize(accuracy = mean(predicted == outcome, na.rm = TRUE)))$accuracy)
 ```
 
 ```{r,echo=FALSE}
@@ -664,34 +385,80 @@ roc_c
 dev.off()
 ```
 
+```{r}
+# saving the results
+save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_model)
+```
+
 ### Regressed out model
 
 ```{r}
 # Covariates to adjust for
-covars <- c("sex","bmi", "age", "VS_total", "eq_vegan_dur_total")
+covars <- c("sex","bmi", "age", "VS_total", "vegan_duration")
 integrated_df <- spca_integrated_df
 all(rownames(integrated_df) == metadata_df$study_id)
-adjusted_data <- adjust_for_covars(integrated_df, covars, metadata_df)
+adjusted_data <- adjust_for_covars(integrated_df, covars, metadata_scaled_df)
 
 model_name <- "adjusted_country_model_vegan" 
 
 prepared_df <- model_preparation(adjusted_data,
                                  metadata_df,
-                                 predicting_col = "Country")
+                                 predicting_col = "country")
 
 rf_model <- make_rf_model(data=prepared_df,
                           outcome="Group",
                           N = 500,
                           file = model_name,
                           reuse=TRUE)
-
+rf_model$model_summary
 roc_c <- roc_curve(model_object = rf_model,CI = TRUE)
 
-roc_c <- ggtheme(roc_c)
+roc_c <- ggtheme(roc_c) 
 
-roc_c
+roc_c 
 
 ```
+
+```{r}
+f <- roc_c 
+save(f,file="../results/vegan/figures/F3a_ROCcountry.RData")
+```
+
+**Confusion matrix**
+
+```{r}
+conf_matrix <- rf_model$predictions %>%
+  group_by(iteration, outcome, predicted) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(outcome, predicted) %>%
+  summarise(mean_count = mean(n), .groups = "drop") %>%
+  pivot_wider(names_from = predicted, values_from = mean_count, values_fill = 0) %>%
+  as.data.frame()
+
+conf_matrix
+
+conf_matrix[,-1] <- conf_matrix[,-1]/rowSums(conf_matrix[,-1])
+
+conf_matrix
+```
+
+```{r}
+conf_matrix <- conf_matrix[,-1]
+countries <- as.character(rf_model$mapping)
+rownames(conf_matrix) <- countries
+colnames(conf_matrix) <- countries
+
+p <- confusion_matrix_plot(conf_matrix,countries)
+p
+
+```
+
+
+```{r}
+f <- p
+save(f,file="../results/vegan/figures/F3b_CMcountry.RData")
+```
+
 
 ```{r,echo=FALSE}
 pdf("../results/vegan/Q1_country/adjusted_rf_country.pdf",width = 6,height = 5)
@@ -699,11 +466,16 @@ roc_c
 dev.off()
 ```
 
+```{r}
+# saving the results
+save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_model)
+```
+
 ## RF importance
 
 ### Original model
 
-**PC5** and **PC14** are the most important for RF model. However, no significant drop occurred in other PCs.
+**PC4** and **PC10** are the most important for RF model. However, no significant drop occurred in other PCs.
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/country_model_vegan/rf_model.RData")
@@ -720,7 +492,7 @@ ggplot(var_imp) +
 
 ### Adjusted model
 
-Similarly as above, the most important are **PC5** and **PC14**. However, the PC14 dropped comparing to ist value in the original model.
+Similarly as above, the most important is **PC4**. The PC10 dropped comparing to 1st value in the original model.
 
 ```{r}
 load("../intermediate_files/models/adjusted_country_model_vegan/rf_model.RData")
@@ -735,7 +507,7 @@ ggplot(var_imp) +
   geom_col(aes(x=PC,y=Importance))
 ```
 
-**Visualization**
+### Visualization
 
 To explore these two important PCs more, their visualization is shown below. 
 
@@ -744,17 +516,19 @@ To explore these two important PCs more, their visualization is shown below.
 ```{r,fig.width=4,fig.height=3}
 spca_plot_df <- merge(
   spca_integrated_df %>% rownames_to_column("study_id"),
-  metadata_df,by="study_id")
+  metadata_scaled_df,by="study_id")
 
 p <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "Country",
+              color_col = "country",
               perform_pca = FALSE,
-              axis = c("PC5","PC14"))
+              axis = c("PC4","PC10"))
 
 p <- ggtheme(p)
 
 p
+
+p_pca[[4]] <- p
 ```
 ```{r,echo=FALSE}
 pdf("../results/vegan/Q1_country/important_PCA.pdf",height = 4,width = 6)
@@ -766,8 +540,8 @@ dev.off()
 
 ```{r}
 plot_list <- list()
-for (col in c("PC5","PC14")){
- p <- ggplot(spca_for_uni, aes_string(x = "Country",y = col,fill="Country")) +
+for (col in c("PC4","PC10")){
+ p <- ggplot(spca_for_uni, aes_string(x = "country",y = col,fill="country")) +
     geom_boxplot() +
     ggtitle(col) + 
     theme_minimal() + 
@@ -779,7 +553,7 @@ for (col in c("PC5","PC14")){
       CH = "#D52B1E"    # red
     )) + 
     geom_signif(comparisons = 
-                  combn(as.character(unique(spca_for_uni$Country)),
+                  combn(as.character(unique(spca_for_uni$country)),
                         m=2, simplify = FALSE),
                 map_signif_level = TRUE, step_increase = 0.1,textsize = 2)
   
@@ -802,21 +576,21 @@ dev.off()
 
 ## SPCA loadings
 
-Here, the loadings of the two important PCs (**PC5** and **PC14**) are explored and saved.
+Here, the loadings of the two important PCs (**PC4** and **PC10**) are explored and saved.
 
 ```{r,collapse=TRUE}
 load("../results/preprocessing/spca_result_all.RData")
 
 df <- data.frame (
-  Metabolite=names(spca_result$loadings$X[,5]),
-  Loading=spca_result$loadings$X[,5])
+  Metabolite=names(spca_result$loadings$X[,4]),
+  Loading=spca_result$loadings$X[,4])
 
 df
 
-write.table(df,sep="\t","../results/vegan/Q1_country/loadings_PC5.tsv")
+write.table(df,sep="\t","../results/vegan/Q1_country/loadings_PC4.tsv")
 ```
 
-This plot shows the loading of individual metabolites to **PC5**, ordered by its absolute value.
+This plot shows the loading of individual metabolites to **PC4**, ordered by its absolute value.
 
 ```{r,fig.height=10,fig.width=5,collapse=TRUE}
 ggplot(df %>% dplyr::mutate(
@@ -833,13 +607,13 @@ spca_loadings <- df$Metabolite[abs(df$Loading)>=0.1]
 
 ```{r}
 df <- data.frame (
-  Metabolite=names(spca_result$loadings$X[,14]),
-  Loading=spca_result$loadings$X[,14])
+  Metabolite=names(spca_result$loadings$X[,10]),
+  Loading=spca_result$loadings$X[,10])
 
-write.table(df,sep="\t","../results/vegan/Q1_country/loadings_PC14.tsv")
+write.table(df,sep="\t","../results/vegan/Q1_country/loadings_PC10.tsv")
 ```
 
-This plot shows the loading of individual metabolites to **PC14**, ordered by its absolute value.
+This plot shows the loading of individual metabolites to **PC10**, ordered by its absolute value.
 
 ```{r,fig.height=10,fig.width=5,collapse=TRUE}
 ggplot(df %>% 
@@ -862,31 +636,16 @@ concat_integrated_df <- cbind(lcms_df,nmr_df)
 
 ## Visualization
 
-### UMAP
-
-```{r}
-p <- umap_plot(concat_integrated_df,metadata_df,color_col = "Country",
-          neighbors = 10,min_dist = 0.1)
-
-p
-```
-
-```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q1_country/concat_umap.pdf",height = 4,width = 6)
-p
-dev.off()
-```
-
 ### Boxplots
 
 ```{r,fig.height=40,fig.width=20}
 concat_for_uni <- merge(concat_integrated_df %>% rownames_to_column("study_id"),
-                      metadata_df,by="study_id",all = TRUE) 
+                      metadata_scaled_df,by="study_id",all = TRUE) 
 
 plot_list <- list()
 for (col in colnames(concat_integrated_df)){
   p <- ggplot(concat_for_uni, 
-              aes(x = Country,y = !!sym(col),fill=Country)) +
+              aes(x = country,y = !!sym(col),fill=country)) +
     geom_boxplot() +
     ggtitle(col) + 
     theme_minimal() + 
@@ -898,7 +657,7 @@ for (col in colnames(concat_integrated_df)){
       CH = "#D52B1E"    # red
     )) + 
     geom_signif(comparisons = 
-                  combn(as.character(unique(concat_for_uni$Country)),
+                  combn(as.character(unique(concat_for_uni$country)),
                         m=2, simplify = FALSE),
                 map_signif_level = TRUE, step_increase = 0.1,textsize = 2)
   
@@ -924,13 +683,13 @@ dev.off()
 library(pheatmap)
 p_df <- concat_integrated_df %>% t()
 
-ann_df <- metadata_df %>% dplyr::select(study_id,Country) %>%
+ann_df <- metadata_df %>% dplyr::select(study_id,country) %>%
   column_to_rownames("study_id")
 
 ann_colors <- list(
-  "Country"=country_colors
+  "country"=country_colors
 )
-names(ann_colors[["Country"]]) <- names(country_colors)
+names(ann_colors[["country"]]) <- names(country_colors)
 
 p <- pheatmap(p_df,cluster_rows = FALSE,show_colnames = FALSE,
               show_rownames = FALSE,
@@ -949,45 +708,19 @@ dev.off()
 
 ## Univariate analysis
 
-Here, the density plot is shown to gather a basic understanding of individual metabolites when comparing the country of origin. Next, the lm model is used to test the differences in countries, while adjusting for covariates.
+The lm model is used to test the differences in countries, while adjusting for covariates:
 
-### Density plot
+Metabolite ~ sex + bmi + age + VS_total + vegan_duration + Country
+    
 
-```{r,fig.height=30,fig.width=40}
-concat_for_uni <- merge(concat_integrated_df %>% rownames_to_column("study_id"),
-                      metadata_df,by="study_id",all = TRUE) 
-
-plot_list <- list()
-for (col in colnames(concat_integrated_df)){
-  p <- ggplot(concat_for_uni, 
-              aes(x = !!sym(col),fill=Country)) +
-    geom_density(alpha = 0.5) +
-    ggtitle(col) + 
-    theme_minimal()
-  
-  plot_list[[length(plot_list) + 1]] <- p
-}
-
-
-a <- wrap_plots(plot_list,guides = "collect")
-
-a
-```
-
-```{r,echo=FALSE}
-pdf("../results/vegan/Q1_country/concat_density.pdf",height = 40,width = 40)
-a
-dev.off()
-```
-
-### Network analysis
+### LM
 
 **LM**
 
 ```{r}
 results_list <- lapply(colnames(concat_integrated_df), 
                        function(x) fit_netglm(x,concat_for_uni,
-                                           tested_variable = "Country"))
+                                           tested_variable = "country"))
 results_df <- do.call(rbind, results_list)
 
 country_effects <- results_df %>%
@@ -995,16 +728,190 @@ country_effects <- results_df %>%
 
 concat_significant <-  country_effects %>%
   filter(p_adj < 0.05)
+
+# save and show
+write.table(concat_significant,"../results/vegan/Q1_country/lm_emmeans.tsv",
+            row.names = FALSE,
+            quote=FALSE,
+            sep="\t")
+
+knitr::kable(concat_significant)
 ```
+
+```{r}
+results_all <- country_effects
+
+# save 
+write.table(results_all,"../results/vegan/Q1_country/lm_emmeans_all.tsv",
+            row.names = FALSE,
+            quote=FALSE,
+            sep="\t")
+```
+
+**Dispersion**
+
+```{r}
+dispersion <- country_effects %>%
+  group_by(metabolite) %>%
+  summarise(
+    range      = max(emmean) - min(emmean),      # simplest: spread between highest and lowest country
+    sd         = sd(emmean),                      # standard deviation of the 5 country means
+    cv         = sd(emmean) / abs(mean(emmean)),  # coefficient of variation (relative dispersion)
+    min_mean   = min(emmean),
+    max_mean   = max(emmean),
+    min_country = country[which.min(emmean)],
+    max_country = country[which.max(emmean)]
+  ) %>%
+  arrange(desc(range))
+
+dispersion
+
+write.table(dispersion,"../results/vegan/Q1_country/dispersion.tsv",sep="\t",row.names = FALSE,quote=FALSE)
+```
+
+```{r}
+results_list_pairwise <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_netglm_pairwise(x,concat_for_uni,
+                                           tested_variable = "country"))
+results_df_pairwise <- do.call(rbind, results_list_pairwise)
+
+country_effects_pairwise <- results_df_pairwise %>%
+  dplyr::mutate(p_adj = p.adjust(`p.value`, method = "BH"))
+
+concat_significant_pairwise <-  country_effects_pairwise %>%
+  filter(p_adj < 0.05)
+
+knitr::kable(concat_significant_pairwise)
+```
+
+
+### Interesting metabolites
+
+```{r,fig.height=7, fig.width=5}
+p_emmeans_heatmap <- direction_heatmap(country_effects)
+p_emmeans_heatmap <- fix_labels(p_emmeans_heatmap)
+p_emmeans_heatmap
+```
+
+```{r}
+f <- p_emmeans_heatmap
+save(f,file="../results/vegan/figures/F3c_CountryHeatmap.RData")
+```
+
+### Forest plot
+
+```{r, fig.height=15,fig.width=5}
+
+country_effects <- merge(country_effects,dispersion[,c("metabolite","range"),all.x=TRUE,by="metabolite"])
+
+# Define custom country colours
+country_colors <- c(
+  "BE" = "#FDDA24",  # gold
+  "CZ" = "#11457E",  # blue
+  "DE" = "#000000",  # black
+  "ES" = "#630356",  # purple
+  "CH" = "#D52B1E"   # red
+)
+
+# Optional: order metabolites by mean effect size
+forest_df <- country_effects %>%
+  group_by(metabolite) %>%
+  mutate(range_eff = mean(range)) %>%
+  ungroup()
+
+forest_df$metabolite <- factor(
+  forest_df$metabolite,
+  levels = forest_df %>% 
+    arrange(range_eff) %>% 
+    pull(metabolite) %>% 
+    unique()
+)
+
+# Forest plot WITHOUT ANY TEXT LABELS
+forest_df <- forest_df %>% mutate(sig = p_adj < 0.05)
+p_forest <- ggplot(forest_df, 
+                   aes(x = emmean, 
+                       y = metabolite, 
+                       color = country)) +
+
+  geom_errorbarh(aes(xmin = lower.CL, xmax = upper.CL), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_point(size = 2.5,aes(shape = sig)) +
+  scale_shape_manual(values = c(`FALSE` = 20, `TRUE` = 19),   # 1 = open, 19 = solid
+                     labels = c("ns", "FDR < 0.05"),
+                     name   = "Significance") + 
+  scale_color_manual(values = country_colors) +
+
+  theme_minimal() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 6),
+        panel.grid.minor = element_blank()) +
+
+  labs(
+    x = "Estimated mean (with 95% CI)",
+    color = "Country"
+  )
+
+p_forest <- fix_labels(p_forest)
+
+p_forest
+
+```
+
+
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q1_country/final_significance_forest.pdf",height = 15,width = 6)
+p_forest
+dev.off()
+```
+
+```{r}
+f <- p_forest
+save(f,file="../results/vegan/figures/FS_CountryForest.RData")
+```
+
+### Heatmap
+
+```{r}
+df2 <- country_effects_pairwise %>%
+  mutate(
+    contrast = gsub(" ", "", contrast),   # remove spaces, e.g. "BE-DE"
+    signif = p_adj < 0.05
+  )
+
+df2$Significance <- ifelse(df2$p_adj<0.001,"***",
+                                       ifelse(df2$p_adj<0.01,"**",
+                                              ifelse(df2$p_adj<0.05,"*","")))
+
+```
+
+```{r,fig.height=8,fig.width=5}
+p_pairwise_heatmap <- ggplot(df2, aes(x = contrast, y = Metabolite, fill = estimate)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Significance,vjust=0.6), color = "black", size = 2) +
+  scale_fill_gradient2(
+    low = "darkcyan", mid = "white", high = "brown", midpoint = 0) + 
+  theme_minimal() +
+  theme(axis.text.y = element_text(size=4),
+        axis.text.x = element_text(angle = 45,face="bold",hjust = 1),
+        panel.grid = element_blank()) + 
+  xlab("") + ylab("")
+
+p_pairwise_heatmap
+```
+
+### Network
 
 **Edge list**
 
 ```{r}
 edges <- country_effects %>%
-  filter(p_adj < 0.05) %>%
-  select(from = Country, to = metabolite, 
+  #filter(abs(emmean) > 0.3) %>%
+  filter(p_adj<0.05) %>%
+  dplyr::select(from = country, to = metabolite, 
          emmean = emmean) %>%
-  mutate(from=as.character(from),
+  dplyr::mutate(from=as.character(from),
          weight=abs(emmean))
 
 edges$from <- as.character(edges$from)
@@ -1034,7 +941,7 @@ g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
 
 **Visualize**
 
-```{r,fig.height=6,fig.width=6}
+```{r,fig.height=7,fig.width=7}
 country_colors <- c(
   BE = "#FDDA24",  # gold
   CZ = "#11457E",  # blue
@@ -1060,13 +967,63 @@ ggraph(g, layout = "fr") +
 
 ```
 
-#### Louvain clustering
+#### Degree calculation
 
-The Louvain method is a community detection algorithm. It tries to find groups of nodes (=communities or clusters) such that:
+A country with high degree means it has many metabolites significantly associated with it.
+We can interpret it in different ways. It has:
+- Strong metabolic distinctiveness
+- Broad metabolic shift
+- Possibly strong dietary/cultural metabolic signature
+- Or stronger statistical power !!
 
-- Nodes inside the same community are densely connected to each other.
+High-degree metabolite can mean:
+- High cross-country variability
+- Reflects common axis of variation
 
-- Nodes in different communities are sparsely connected.
+Low-degree metabolite (1–2 countries)
+- More country-specific signal
+- Better candidate geographic biomarker
+
+```{r}
+# Calculate degree
+deg <- degree(g, mode = "all")
+
+# Add to node dataframe
+node_degree_df <- data.frame(
+  name = names(deg),
+  degree = deg,
+  type = V(g)$type
+)
+
+# Separate interpretation
+country_nodes <- node_degree_df %>% dplyr::filter(type == TRUE)
+metabolite_nodes <- node_degree_df %>% dplyr::filter(type == FALSE)
+
+country_nodes %>% arrange(desc(degree))
+metabolite_nodes %>% arrange(desc(degree))
+```
+
+**Weighted degree**
+- Should reflect cumulative association magnitude, not just number of links.
+
+```{r}
+strength_vals <- strength(g, weights = E(g)$weight)
+
+node_strength_df <- data.frame(
+  name = names(strength_vals),
+  strength = strength_vals,
+  type = V(g)$type
+)
+
+# Separate interpretation
+country_nodes <- node_strength_df %>% dplyr::filter(type == TRUE)
+metabolite_nodes <- node_strength_df %>% dplyr::filter(type == FALSE)
+
+country_nodes %>% arrange(desc(strength))
+metabolite_nodes %>% arrange(desc(strength))
+```
+
+#### Top-group assignment
 
 **Based on positive associations**
 
@@ -1084,7 +1041,8 @@ country_colors <- c(
   CZ = "#11457E",  # blue
   DE = "#000000",  # black
   ES = "#630356",  # purple
-  CH = "#D52B1E"   # red
+  CH = "#D52B1E",   # red
+  "other" = "gray70"
 )
 
 # Assign colors to nodes: countries get their color, metabolites gray
@@ -1092,35 +1050,55 @@ V(g_pos)$color <- ifelse(V(g_pos)$type,
                      country_colors[V(g_pos)$name],
                      "gray70")
 
-cl_pos <- cluster_louvain(g_pos)
-groups <- communities(cl_pos)  
+top_group <- edges_pos %>%
+  dplyr::group_by(to) %>%
+  slice_max(order_by = weight, n = 1, with_ties = FALSE) %>%
+  dplyr::select(from,to, weight) %>%
+  ungroup()
+
+top_group
+
+top_group_viz <- rbind(top_group, 
+                       data.frame(
+                         from=unique(edges$from),
+                         to=unique(edges$from),
+                         weight=NA))
+
+top_group_viz <- rbind(top_group_viz,
+                   data.frame(from="other",
+                              to=names(V(g_pos))[!names(V(g_pos)) %in% top_group_viz$to],
+                              weight=NA))
+
 membership_df <- data.frame(
-  vertex = names(membership(cl_pos)),
-  cluster = membership(cl_pos)
-)
-membership_df
+  vertex = top_group_viz$to,
+  cluster = top_group_viz$from) 
+
+membership_df <- membership_df %>% arrange(match(vertex,names(V(g_pos))))
+
+
 ```
 
 ```{r}
-countries_clusters <- (membership_df %>%
+country_clusters <- (membership_df %>%
   group_by(cluster) %>%
   summarise(metabolites = paste(unique(vertex), collapse = ", ")))[1:5,]
 
-countries_clusters
+(membership_df %>%
+  group_by(cluster) %>%
+  summarise(Number_of_metabolites = length(unique(vertex))-1))[1:5,]
+
+country_clusters
 ```
 
 ```{r}
-g_country_colors <- country_colors[c(2,1,4,5,3)]
-g_country_colors <- c(g_country_colors,rep("gray70",10))
-g2_country_colors <- g_country_colors
-V(g_pos)$fill <- g_country_colors[membership_df$cluster]
-V(g_pos)$color <- g2_country_colors[membership_df$cluster]
+V(g_pos)$fill <- country_colors[membership_df$cluster]
+V(g_pos)$color <- country_colors[membership_df$cluster]
 ```
 
 
 ```{r,fig.height=6,fig.width=6}
 set.seed(123)
-p <- ggraph(g_pos, layout = "fr") +
+p_pos <- ggraph(g_pos, layout = "fr") +
   geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
   scale_edge_color_manual(values = c("lightpink"), labels = c(">0")) +
   geom_node_point(aes(size=type,color = name,fill=name),shape=21,stroke=1.2) +
@@ -1130,12 +1108,12 @@ scale_fill_manual(values = setNames(V(g_pos)$fill, V(g_pos)$name)) +  # node fil
   theme_void() + 
   theme(legend.position = "none")
 
-p
+p_pos
 ```
 
 ```{r,echo=FALSE}
 pdf("../results/vegan/Q1_country/network_concat_pos.pdf",height = 6,width = 6)
-p
+p_pos
 dev.off()
 ```
 
@@ -1155,7 +1133,8 @@ country_colors <- c(
   CZ = "#11457E",  # blue
   DE = "#000000",  # black
   ES = "#630356",  # purple
-  CH = "#D52B1E"   # red
+  CH = "#D52B1E",   # red
+  "other" = "gray70"
 )
 
 # Assign colors to nodes: countries get their color, metabolites gray
@@ -1163,34 +1142,57 @@ V(g_neg)$color <- ifelse(V(g_neg)$type,
                      country_colors[V(g_neg)$name],
                      "gray70")
 
-cl_neg <- cluster_louvain(g_neg)
-groups <- communities(cl_neg)  
+top_group <- edges_neg %>%
+  group_by(to) %>%
+  slice_max(order_by = weight, n = 1, with_ties = FALSE) %>%
+  dplyr::select(from,to, weight) %>%
+  ungroup()
+
+top_group
+
+top_group_viz <- rbind(top_group, 
+                       data.frame(
+                         from=unique(edges$from),
+                         to=unique(edges$from),
+                         weight=NA))
+
+top_group_viz <- rbind(top_group_viz,
+                   data.frame(from="other",
+                              to=names(V(g_neg))[!names(V(g_neg)) %in% top_group_viz$to],
+                              weight=NA))
+
 membership_df <- data.frame(
-  vertex = names(membership(cl_neg)),
-  cluster = membership(cl_neg)
-)
-membership_df
+  vertex = top_group_viz$to,
+  cluster = top_group_viz$from) 
+
+membership_df <- membership_df %>% arrange(match(vertex,names(V(g_neg))))
 ```
 ```{r}
-countries_clusters <- (membership_df %>%
+country_clusters <- (membership_df %>%
   group_by(cluster) %>%
   summarise(metabolites = paste(unique(vertex), collapse = ", ")))[1:5,]
 
-countries_clusters
+(membership_df %>%
+  group_by(cluster) %>%
+  summarise(Number_of_metabolites = length(unique(vertex))-1))[1:5,]
 ```
 
 ```{r}
-g_country_colors <- country_colors[c(2,1,4,5,3)]
-g_country_colors <- c(g_country_colors,rep("gray70",10))
-g2_country_colors <- g_country_colors
-V(g_neg)$fill <- g_country_colors[membership_df$cluster]
-V(g_neg)$color <- g2_country_colors[membership_df$cluster]
+vs_clusters <- (membership_df %>%
+  group_by(cluster) %>%
+  summarise(metabolites = paste(unique(vertex), collapse = ", ")))[1:5,]
+
+vs_clusters 
 ```
 
+```{r}
+V(g_neg)$fill <- country_colors[membership_df$cluster]
+V(g_neg)$color <- country_colors[membership_df$cluster]
+```
 
 ```{r,fig.height=6,fig.width=6}
 set.seed(123)
-p <- ggraph(g_neg, layout = "fr") +
+p_neg <- ggraph(g_neg, layout = "fr") +
   geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
   scale_edge_color_manual(values = c("lightblue"), labels = c("<0")) +
   geom_node_point(aes(size=type,color = name,fill=name),shape=21,stroke=1.2) +
@@ -1200,147 +1202,25 @@ scale_fill_manual(values = setNames(V(g_neg)$fill, V(g_neg)$name)) +  # node fil
   theme_void() + 
   theme(legend.position = "none")
 
-p 
+p_neg
 ```
 
 ```{r,echo=FALSE}
 pdf("../results/vegan/Q1_country/network_concat_neg.pdf",height = 6,width = 6)
-p
+p_neg
 dev.off()
 ```
 
+# Final significant metabolites
 
-## RF model
-
-### Original model
-
-```{r}
-model_name <- "concat_country_model_vegan" 
-
-prepared_df <- model_preparation(concat_integrated_df,
-                                 metadata_df,
-                                 predicting_col = "Country")
-
-rf_model <- make_rf_model(data=prepared_df,
-                          outcome="Group",
-                          N = 10,
-                          file = model_name,
-                          reuse=TRUE)
-
-roc_c <- roc_curve(model_object = rf_model,CI = TRUE)
-
-roc_c
-```
-
-```{r,echo=FALSE}
-pdf("../results/vegan/Q1_country/concat_orig_rf_country.pdf",width = 6,height = 5)
-roc_c
-dev.off()
-```
-
-### Regressed out model
-
-```{r}
-# Covariates to adjust for
-covars <- c("sex","bmi", "age", "VS_total", "eq_vegan_dur_total")
-integrated_df <- concat_integrated_df
-all(rownames(integrated_df) == metadata_df$study_id)
-adjusted_data <- adjust_for_covars(integrated_df, covars, metadata_df)
-
-model_name <- "concat_adjusted_country_model_vegan" 
-
-prepared_df <- model_preparation(adjusted_data,
-                                 metadata_df,
-                                 predicting_col = "Country")
-
-rf_model <- make_rf_model(data=prepared_df,
-                          outcome="Group",
-                          N = 10,
-                          file = model_name,
-                          reuse=TRUE)
-
-roc_c <- roc_curve(model_object = rf_model,CI = TRUE)
-
-roc_c <- ggtheme(roc_c)
-
-roc_c
-
-```
-
-```{r,echo=FALSE}
-pdf("../results/vegan/Q1_country/concat_adjusted_rf_country.pdf",width = 6,height = 5)
-roc_c
-dev.off()
-```
-
-## RF importance
-
-### Original model
-
-```{r,fig.height=10,fig.width=5}
-load("../intermediate_files/models/concat_country_model_vegan/rf_model.RData")
-
-var_imp <- as.data.frame(importance(rf_model$trained_model)) %>%
-  rownames_to_column("Metabolite") %>%
-  `colnames<-`(c("Metabolite","Importance")) 
-                                                 
-var_imp <- var_imp %>%
-  dplyr::mutate(Metabolite=factor(Metabolite,levels = Metabolite[order(var_imp$Importance,decreasing = FALSE)])) 
-
-ggplot(var_imp) + 
-  geom_col(aes(x=Metabolite,y=Importance)) + 
-  theme(axis.text.x = element_text(angle=90)) + 
-  coord_flip()
-```
-
-```{r}
-concat_importance <- var_imp$Metabolite[var_imp$Importance>5]
-```
-
-### Adjusted model
-
-```{r,fig.height=10,fig.width=5}
-load("../intermediate_files/models/concat_adjusted_country_model_vegan/rf_model.RData")
-
-var_imp <- as.data.frame(importance(rf_model$trained_model)) %>%
-  rownames_to_column("Metabolite") %>%
-  `colnames<-`(c("Metabolite","Importance")) 
-
-var_imp <- var_imp %>%
-  dplyr::mutate(Metabolite=factor(Metabolite,levels = Metabolite[order(var_imp$Importance,decreasing = FALSE)])) 
-
-
-ggplot(var_imp) + 
-  geom_col(aes(x=Metabolite,y=Importance)) + 
-  theme(axis.text.x = element_text(angle=90)) + 
-  coord_flip()
-```
-
-```{r}
-concat_importance <- var_imp$Metabolite[var_imp$Importance>5]
-```
-
-
-# Importance across different approaches
+::: {.output-background style="background-color: lightgreen; padding: 10px;"}
 
 ```{r,fig.height=10,fig.width=15}
 
 list_core <- list()
 
-list_core[["scpa_loadings"]] <- spca_loadings
 list_core[["concat_univariate"]] <- unique(concat_significant$metabolite)
 
-venn <- ggvenn(list_core) 
-venn
-```
-
-The final significant metabolites:
-
-::: {.output-background style="background-color: lightgreen; padding: 10px;"}
-
-```{r,echo=FALSE,eval=FALSE}
-final_significance <- Reduce(intersect, list_core)
-final_significance
 ```
 
 ```{r}
@@ -1350,6 +1230,47 @@ final_significance
 :::
 
 # Plot for publication
+
+## PCA
+
+```{r,fig.height=4,fig.width=8}
+p1 <- p_pca[[1]] 
+country_leg <- ggpubr::get_legend(p1)
+p1 <- p1 + theme(legend.position = "none")
+
+p2 <- p_pca[[4]] 
+p2 <- p2 + theme(legend.position = "none")
+
+p3 <- p_pca[[2]] + 
+  geom_text(aes(x=0.15,y=1),label=paste0("R²=",round(p_pca[[3]]$R2[6],2),"\n p<0.001"),size=2,color="white")
+
+factor_leg <- ggpubr::get_legend(p3)
+p3 <- p3 + theme(legend.position = "none")
+
+legends <- ggarrange(country_leg, factor_leg, nrow = 2, align = "hv")
+
+layout <- "
+AABBDD
+AABBDD
+AABBDD
+CCCCDD
+"
+
+# Now plot!
+p1 + p2 + p3 + legends + 
+plot_layout(design = layout, heights = c(2,2,2,1),widths = c(1,1,1,1,1,1))
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q1_country/pca_final.pdf",height = 4,width = 8)
+p1 + p2 + p3 + legends + 
+plot_layout(design = layout, heights = c(2,2,2,1),widths = c(1,1,1,1,1,1))
+dev.off()
+```
+
+## Heatmap
+
+### Emmeans
 
 ```{r,fig.height=10,fig.width=15}
 concat_significant_df <- concat_significant
@@ -1363,7 +1284,7 @@ heatmap_concat_integrated_df <- concat_integrated_df
 
 # Calculate the mean for each group
 df_grouped <- aggregate(heatmap_concat_integrated_df, 
-                        by = list(Group = metadata_df$Country), FUN = median)
+                        by = list(Group = metadata_df$country), FUN = median)
 
 ```
 
@@ -1374,14 +1295,14 @@ country_effects$Significance <- ifelse(country_effects$p_adj<0.001,"***",
                                        ifelse(country_effects$p_adj<0.01,"**",
                                               ifelse(country_effects$p_adj<0.05,"*","")))
 
-p_heat <- ggplot(country_effects, aes(x = Country, y = metabolite, fill = emmean)) +
+p_heat <- ggplot(country_effects, aes(x = country, y = metabolite, fill = emmean)) +
   geom_tile(color = "white",width=1) +
    geom_text(aes(label = Significance,vjust=0.6), color = "black", size = 2) +  # Add asterisks for significant points
   theme_minimal() +
   theme(axis.title.x = element_text(face = "bold",size = 9),
         axis.text.y = element_text(size=4),
         panel.grid = element_blank()) + 
-  labs(fill = "LM estimate") +
+  labs(fill = "Estimated mean") +
   xlab("") + 
   ylab("") + 
   scale_fill_gradient2(
@@ -1390,16 +1311,61 @@ p_heat <- ggplot(country_effects, aes(x = Country, y = metabolite, fill = emmean
 p_heat
 ```
 
-
 ```{r,echo=FALSE}
 pdf("../results/vegan/Q1_country/final_significance.pdf",height = 7,width = 6)
 p_heat
 dev.off()
 ```
 
-```{r}
-ggplot(concat_for_uni,aes(x=tryptophan_1,y=Tryptophan,color=Country)) + 
-  geom_point() + 
-  geom_smooth(method = "lm") 
+### Interesting metabolites
+
+```{r,fig.height=7,fig.width=5}
+p_emmeans_heatmap
 ```
 
+```{r,echo=FALSE}
+cairo_pdf("../results/vegan/Q1_country/interesting_metab_heatmap.pdf", 
+          height = 7, width = 5)
+p_emmeans_heatmap
+dev.off()
+```
+
+```{r}
+fsup1b <- p_emmeans_heatmap
+save(fsup1b,file="../results/vegan/figures/fsup1b.RData")
+```
+
+### Pairwise
+
+```{r,fig.height=8,fig.width=5}
+p_pairwise_heatmap
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q1_country/final_significance_pairwise.pdf",height = 8,width = 5)
+p_pairwise_heatmap
+dev.off()
+```
+
+## Forest plot
+
+```{r,fig.height=20,fig.width=8}
+p_forest
+```
+
+```{r}
+save(p_forest,file = "../results/vegan/figures/FS1.RData")
+```
+
+## Network
+
+```{r,fig.width=11,fig.height=6}
+p_net <- ggarrange(p_pos,p_neg,labels = c("A","B"))
+p_net
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q1_country/final_significance_networks.pdf",height = 6,width = 11)
+p_net
+dev.off()
+```

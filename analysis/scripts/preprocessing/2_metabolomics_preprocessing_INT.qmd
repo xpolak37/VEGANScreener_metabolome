@@ -1,0 +1,438 @@
+---
+title: "VEGANScreener + metabolomics"
+subtitle: "Preprocessing part 2: Metabolomics"
+author: "Petra Polakovicova"
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    df-print: paged
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+This script serves for preprocessing the metabolomics data. Here, we have two datasets derived from the same samples. One dataset is a result of LC-MS approach, the other is obtained by NMR.
+
+How will the analysis be addressed:
+
+**Preprocessing per Platform**
+
+Treating the NMR and LC-MS results as two separate datasets at first. Normalize and QC them separately:
+
+-   NMR → log-transform if needed, auto-scale.
+-   LC-MS → batch correction (ComBat), impute missing values, scaling.
+
+**Data Integration**
+
+Keep both NMR and LC-MS features, concatenate after scaling. Use mixOmics sPCA that is designed for multi-omics from heterogeneous platforms. This is the modern state-of-the-art for such cases. Pros: Keeps full richness of data. Cons: Requires careful handling of batch/variance scaling.
+
+```{r}
+library(sva)
+library(mixOmics)
+library(mice)
+library(openxlsx)
+library(ggplot2)
+library(reshape2)
+library(DataExplorer)
+library(dplyr)
+library(mice)
+library(MOFA2)
+library(patchwork)
+library(ggvenn)
+library(tidyverse)
+library(ggpubr)
+library(pheatmap)
+library(data.table)
+```
+
+# Preprocessing
+
+## Listing identified metabolites
+
+**LCMS**
+
+```{r}
+lc_ms_df <- read.xlsx(
+  "../../../Data/raw/metabolomics/edited/VeganScreener_lcms_edited.xlsx")
+
+metabolites_names_lcms <- read.xlsx(
+  "../../../Data/raw/metabolomics/edited/VeganScreener_lcms_edited.xlsx",
+  sheet="metab")
+
+metabolites_lcms <- metabolites_names_lcms$ident
+```
+
+**NMR**
+
+```{r}
+nmr_df <- read.xlsx(
+  "../../../Data/raw/metabolomics/edited/NMR_metabolome_VGScreener.xlsx")
+
+metabolites_nmr <- nmr_df[1,4:30]
+nmr_df <- nmr_df[-c(1,2),]
+
+samplenames <- nmr_df[,1]
+rownames(nmr_df) <- samplenames
+
+nmr_df <- nmr_df[,-c(1,2,3)]
+colnames(nmr_df) <- metabolites_nmr
+
+nmr_df <- as.data.frame(apply(nmr_df,2,function(x) as.numeric(x))) %>%
+  `row.names<-`(samplenames)
+
+metabolites_nmr <- as.character(metabolites_nmr)
+```
+
+**Comparison**
+
+```{r}
+list_core <- list()
+list_core[["NMR"]] <- metabolites_nmr
+list_core[["LCMS"]] <- metabolites_lcms
+
+venn <- ggvenn(list_core, fill_color = c("blue", "red")) + 
+    ggtitle("NMR vs LCMS") + 
+    guides(fill = "none")
+
+venn
+```
+
+## Import
+
+**Load**
+
+```{r}
+# Metadata
+metadata_df <- read.table(
+  file = "../../../data/raw/veganscreener/metadata_extracted_Fulldata.tsv", 
+  header = TRUE) %>%
+  dplyr::filter(group=="VG")
+
+# LCMS
+lc_ms_df <- read.xlsx(
+  "../../../Data/raw/metabolomics/edited/VeganScreener_lcms_edited.xlsx")
+
+lc_ms_df <- lc_ms_df %>% 
+  column_to_rownames("study_id") %>%
+  t() %>%
+  as.data.frame(check.names = FALSE) %>%
+  rownames_to_column("Metabolite")
+
+# NMR
+nmr_df <- read.xlsx(
+  "../../../Data/raw/metabolomics/edited/NMR_metabolome_VGScreener.xlsx")
+
+nmr_df <- nmr_df %>% 
+  column_to_rownames("study_id") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("Metabolite")
+```
+
+**Remove outliers** (other sex, bmi \< 15)
+
+```{r}
+metadata_df <- metadata_df %>% dplyr::filter(bmi>15,sex != "OTHER") %>% drop_na(VS_total)
+```
+
+**Get only important samples**
+
+```{r}
+# get common samples
+common_samples <- Reduce(intersect, 
+                         list(colnames(lc_ms_df)[-1],
+                              colnames(nmr_df)[-1], 
+                              metadata_df$study_id))
+
+# extract only common samples in these datasets
+lc_ms_df <- lc_ms_df[,c("Metabolite",common_samples)]
+nmr_df <- nmr_df[,c("Metabolite",common_samples)]
+metadata_df <- metadata_df %>% dplyr::filter(study_id %in% common_samples) 
+
+```
+
+```{r}
+write.table(metadata_df,"../../../data/preprocessed/metadata_preprocessed_v3.tsv",
+            row.names = FALSE,quote=FALSE,sep="\t")
+```
+
+## LC-MS
+
+### Missing value test
+
+We miss 0.02% of data.
+
+```{r}
+df_for_test <- lc_ms_df
+df_for_test[df_for_test==0] <- NA
+df_for_test[df_for_test==""] <- NA
+
+100*sum(is.na(df_for_test))/(dim(df_for_test)[1]*dim(df_for_test)[2])
+```
+
+### Removing NaNs
+
+Removing metabolites when we have 20% missing. All metabolites preserved.
+
+```{r}
+df_for_test[df_for_test==0] <- NA
+data_clean <- df_for_test %>%
+  rowwise() %>%
+  filter(mean(is.na(c_across(-Metabolite))) < 0.2) %>%
+  ungroup()
+```
+
+### Imputation
+
+```{r}
+data_clean[data_clean==0] <- NA
+
+imputed_data <- mice(as.data.frame(t(data_clean[,-1])), 
+                     m = 5, method = 'pmm', seed = 123)
+
+completed_data <- complete(imputed_data, 1)
+
+colnames(completed_data) <- data_clean$Metabolite
+
+which(is.na(completed_data), arr.ind = TRUE)
+100*sum(is.na(completed_data))/(50*382)
+```
+
+We successfully imputed the 0.2% of data.
+
+**Comparison**
+
+To check the quality of imputation, we will plot the imputed values.
+
+```{r}
+data_clean <- data_clean %>% 
+  column_to_rownames("Metabolite") %>%  
+  t() %>% as.data.frame()
+
+nans <- which(is.na(data_clean), arr.ind = TRUE)
+
+plot_df <- as.data.frame(completed_data[,unique(nans[,2])])
+plot_df$imputed <- "NO"
+plot_df$imputed[unique(nans[,1])] <- "YES"
+colnames(plot_df) <- c("value","imputed")
+
+p <- ggplot(plot_df) + 
+  geom_jitter(aes(x="",y=value,color=imputed))
+
+p
+```
+
+The imputation looks fine, now lets see if the imputation did not disturb the overall composition using PCA.
+
+```{r}
+data_before <- data_clean
+data_before[is.na(data_before)] <- 0
+
+pca_before <- as.data.frame(
+  prcomp(data_before,center = TRUE,scale=TRUE)$x 
+)
+pca_before$imputed_sample <- "NO"
+pca_before$imputed_sample[unique(nans[,1])] <- "YES"
+
+p_before <- ggplot(pca_before) + 
+     geom_point(aes(x=PC1,y=PC2,color=imputed_sample)) + 
+     theme_minimal() + 
+     theme(panel.border = element_rect(color = "black", 
+                                       fill = NA, size = 0),
+           axis.ticks.x = element_line(size=0.3,color = "black"),
+           axis.ticks.y = element_line(size=0.3,color="black"),
+          axis.ticks.length = unit(4,"pt"),
+           axis.text = element_text(face = "bold",colour = "black"),
+           axis.title = element_text(face = "bold",colour = "black"),
+           panel.grid = element_blank()) + 
+     theme(legend.position = "right") 
+
+```
+
+```{r}
+pca_after <- as.data.frame(
+  prcomp(completed_data,center = TRUE,scale=TRUE)$x
+)
+pca_after$imputed_sample <- "NO"
+pca_after$imputed_sample[unique(nans[,1])] <- "YES"
+
+p_after <- ggplot(pca_after) + 
+     geom_point(aes(x=PC1,y=PC2,color=imputed_sample)) + 
+     theme_minimal() + 
+     theme(panel.border = element_rect(color = "black", fill = NA, size = 0),
+           axis.ticks.x = element_line(size=0.3,color = "black"),
+           axis.ticks.y = element_line(size=0.3,color="black"),
+          axis.ticks.length = unit(4,"pt"),
+           axis.text = element_text(face = "bold",colour = "black"),
+           axis.title = element_text(face = "bold",colour = "black"),
+           panel.grid = element_blank()) + 
+     theme(legend.position = "right") 
+```
+
+Looks fine.
+
+```{r}
+wrap_plots(p_before,p_after,guides = "collect")
+```
+
+### INT
+
+```{r}
+x <- apply(completed_data,2,function(x) qnorm((rank(x,na.last="keep")-0.5)/sum(!is.na(x))))
+```
+
+Basic plots for visualizing the distribution:
+
+```{r,fig.width=25}
+plot_list <- list()
+name <- colnames(x)
+i <- 1
+for (col in name){
+  p <- ggplot(x) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(x[,col],na.rm = TRUE),2),"+-", round(sd(x[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+
+```{r}
+write.table(x,"../../../Data/preprocessed/metabolomics/lc_ms_preprocessed_INT_v3.tsv",row.names = TRUE,sep="\t")
+```
+
+## NMR
+
+### Missing value test
+
+We miss 0.0% of data.
+
+```{r}
+df_for_test <- nmr_df
+df_for_test[df_for_test==0] <- NA
+df_for_test[df_for_test==""] <- NA
+
+100*sum(is.na(df_for_test))/(dim(df_for_test)[1]*dim(df_for_test)[2])
+```
+
+### Removing NaNs
+
+All metabolites preserved, as we didn't have any NA.
+
+```{r}
+df_for_test[df_for_test==0] <- NA
+data_clean <- df_for_test %>%
+  rowwise() %>%
+  filter(mean(is.na(c_across(-Metabolite))) < 0.2) %>%
+  ungroup()
+```
+
+### Imputation
+
+```{r}
+completed_data <- data_clean %>% column_to_rownames("Metabolite") %>% t()
+```
+
+### INT
+
+```{r}
+x <- apply(completed_data,2,function(x) qnorm((rank(x,na.last="keep")-0.5)/sum(!is.na(x))))
+
+```
+
+Basic plots for visualizing the distribution:
+
+```{r,fig.width=25}
+plot_list <- list()
+name <- colnames(x)
+i <- 1
+for (col in name){
+  p <- ggplot(x) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(x[,col],na.rm = TRUE),2),"+-", round(sd(x[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+
+```{r}
+write.table(x,"../../../Data/preprocessed/metabolomics/nmr_preprocessed_INT_v3.tsv",row.names = TRUE,sep="\t")
+```
+
+# Integration
+
+Firstly, we need to import our data.
+
+```{r}
+lcms_df <- read.table(
+  "../../../Data/preprocessed/metabolomics/lc_ms_preprocessed_INT_v3.tsv")
+
+nmr_df <- read.table(
+  "../../../Data/preprocessed/metabolomics/nmr_preprocessed_INT_v3.tsv")
+
+metadata_df <- read.table(
+  "../../../Data/preprocessed/metadata_preprocessed_v3.tsv",header=TRUE)
+
+common_samples <- Reduce(intersect, list(rownames(lcms_df),
+                                     rownames(nmr_df), 
+                                     metadata_df$study_id))
+
+lcms_vegans <- lcms_df[common_samples,]
+nmr_vegans <- nmr_df[common_samples,]
+
+```
+
+### MixOmics SPCA
+
+```{r}
+integrated_df <- cbind(nmr_vegans,lcms_vegans)
+
+spca_result <- mixOmics::spca(integrated_df,ncomp = 20)
+
+spca_data <- spca_result$variates$X
+
+write.table(spca_data,"../../../Data/preprocessed/metabolomics/spca_integrated_vegans_INT_v3.tsv",row.names = TRUE, sep="\t")
+```
+
+```{r}
+save(spca_result,file="../../Results/preprocessing/spca_result_vegans_INT_v3.RData")
+```

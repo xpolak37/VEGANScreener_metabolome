@@ -1,0 +1,394 @@
+---
+title: "VEGANScreener + metabolomics"
+subtitle: "Q1h: Helper script for Countries ~ PDI groups associations"
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+```{r,echo=FALSE}
+source("custom_functions_vegans.R")
+```
+
+# Import
+
+```{r}
+metadata_df <- read.table(
+  file =  "../../data/preprocessed/metadata_preprocessed_v3.tsv",header = TRUE)
+
+lcms_df <- read.table(
+  file= "../../data/preprocessed/metabolomics/lc_ms_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+nmr_df <- read.table(
+  file = "../../data/preprocessed/metabolomics/nmr_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+spca_integrated_df <-  read.table(
+  file = "../../data/preprocessed/metabolomics/spca_integrated_vegans_INT_v3.tsv",
+  check.names = FALSE)
+
+pdi_df <- as.data.frame(fread(
+  file = "../../data/preprocessed/dietary/pdi/pdi_avg_residuals_scaled_v3.tsv")) %>%
+  dplyr::select(-c(age,gender,bmi,eq_included_group,study_center,PDI_sweets_and_desserts_alt_avg))
+
+```
+
+**We will remove the animal-related groups.**
+
+```{r}
+pdi_df <- pdi_df %>% dplyr::select(-c(PDI_animal_fat_avg,PDI_eggs_avg,PDI_fish_or_seafood_avg,PDI_meat_avg,PDI_dairy_avg))
+```
+
+**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
+
+```{r}
+metadata_scaled_df <- metadata_df
+metadata_scaled_df[,-c(1,3,5,6,8)] <- apply(metadata_df[,-c(1,3,5,6,8)],2,scale)
+metadata_scaled_df <- metadata_scaled_df %>%
+  mutate(sex=as.factor(sex),
+         country=as.factor(country),
+         group=as.factor(group),
+         diet_supplements=as.factor(diet_supplements))
+```
+
+# Concatenated dataset
+
+```{r}
+concat_integrated_df <- cbind(lcms_df,nmr_df)
+```
+
+
+```{r}
+concat_for_uni <- merge(concat_integrated_df %>% rownames_to_column("study_id"),
+                      metadata_scaled_df,by="study_id",all = TRUE) 
+concat_for_uni <- merge(concat_for_uni,pdi_df,by="study_id",all = TRUE)
+```
+
+## Visualization
+
+```{r,fig.height=40,fig.width=20}
+pdi_for_uni <- merge(pdi_df,
+                      metadata_scaled_df,by="study_id",all = TRUE) 
+
+plot_list <- list()
+for (col in colnames(pdi_for_uni)[-1]){
+  p <- ggplot(pdi_for_uni, 
+              aes(x = country,y = !!sym(col),fill=country)) +
+    geom_boxplot() +
+    ggtitle(col) + 
+    theme_minimal() + 
+    scale_fill_manual(values=c(
+      BE = "#FDDA24",   # gold
+      CZ = "#11457E",   # blue
+      DE = "#000000",   # black
+      ES = "#630356",   # purple
+      CH = "#D52B1E"    # red
+    )) + 
+    geom_signif(comparisons = 
+                  combn(as.character(unique(concat_for_uni$country)),
+                        m=2, simplify = FALSE),
+                map_signif_level = TRUE, step_increase = 0.1,textsize = 2)
+  
+  p <- ggtheme(p)
+  plot_list[[length(plot_list) + 1]] <- p
+}
+
+
+a <- wrap_plots(plot_list,guides = "collect")
+
+a
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q1_country/concat_boxplots_pdi.pdf",height = 20,width = 20)
+a
+dev.off()
+```
+
+## Univariate analysis
+
+The lm model is used to test the differences in countries, while adjusting for covariates:
+
+*PDI group* ~ sex + bmi + age + VS_total + vegan_duration + Country
+    
+
+### LM
+
+**LM**
+
+```{r}
+results_list <- lapply(colnames(pdi_df)[-c(1,14:20)], 
+                       function(x) fit_netglm(x,concat_for_uni,
+                                           tested_variable = "country"))
+results_df <- do.call(rbind, results_list)
+
+country_effects <- results_df %>%
+  dplyr::mutate(p_adj = p.adjust(`p.value`, method = "BH")) %>%
+  dplyr::mutate(PDI_group=metabolite)
+
+concat_significant <-  country_effects %>%
+  filter(p_adj < 0.05)
+```
+
+```{r}
+results_list_pairwise <- lapply(colnames(pdi_df)[-c(1,14:20)], 
+                       function(x) fit_netglm_pairwise(x,concat_for_uni,
+                                           tested_variable = "country"))
+results_df_pairwise <- do.call(rbind, results_list_pairwise)
+
+country_effects_pairwise <- results_df_pairwise %>%
+  dplyr::mutate(p_adj = p.adjust(`p.value`, method = "BH")) %>%
+  dplyr::mutate(PDI_group=Metabolite)
+
+concat_significant_pairwise <-  country_effects_pairwise %>%
+  filter(p_adj < 0.05)
+```
+
+### Heatmap
+
+```{r}
+df2 <- country_effects_pairwise %>%
+  mutate(
+    contrast = gsub(" ", "", contrast),   # remove spaces, e.g. "BE-DE"
+    signif = p_adj < 0.05
+  )
+
+df2$Significance <- ifelse(df2$p_adj<0.001,"***",
+                                       ifelse(df2$p_adj<0.01,"**",
+                                              ifelse(df2$p_adj<0.05,"*","")))
+
+```
+
+```{r,fig.height=4,fig.width=5}
+p_pairwise_heatmap <- ggplot(df2, aes(x = contrast, y = PDI_group, fill = estimate)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Significance,vjust=0.6), color = "black", size = 2) +
+  scale_fill_gradient2(
+    low = "darkcyan", mid = "white", high = "brown", midpoint = 0) + 
+  theme_minimal() +
+  theme(axis.text.y = element_text(size=4),
+        axis.text.x = element_text(angle = 45,face="bold",hjust = 1),
+        panel.grid = element_blank()) + 
+  xlab("") + ylab("")
+
+p_pairwise_heatmap
+```
+
+### Network
+
+#### All edges (>0.3)
+
+**Edge list**
+
+```{r}
+edges <- country_effects %>%
+  filter(abs(emmean) > 0.3) %>%
+  dplyr::select(from = country, to = PDI_group, 
+         emmean = emmean) %>%
+  dplyr::mutate(from=as.character(from),
+         weight=abs(emmean))
+
+edges$from <- as.character(edges$from)
+edges$to   <- as.character(edges$to)
+```
+
+**Nodes table**
+
+```{r}
+library(igraph)
+library(ggraph)
+
+countries <- as.character(unique(edges$from))
+metabs <- as.character(unique(edges$to))
+
+nodes <- data.frame(
+  name = c(countries, metabs),
+  type = c(rep(TRUE, length(countries)), rep(FALSE, length(metabs))) # TRUE = country, FALSE = metabolite
+)
+```
+
+**Build igraph object**
+
+```{r}
+g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+```
+
+**Visualize**
+
+```{r,fig.height=5,fig.width=8}
+country_colors <- c(
+  BE = "#FDDA24",  # gold
+  CZ = "#11457E",  # blue
+  DE = "#000000",  # black
+  ES = "#630356",  # purple
+  CH = "#D52B1E"   # red
+)
+
+# Assign colors to nodes: countries get their color, metabolites gray
+V(g)$color <- ifelse(V(g)$type,
+                     country_colors[V(g)$name],
+                     "gray70")
+
+library(stringr)
+V(g)$label <- V(g)$name |>
+  str_remove("^PDI_") |>
+  str_remove("_avg$") |>
+  str_replace_all("_", " ")
+
+overrides <- c(
+  "legume vegetarian prot a" = "legumes & vegetarian protein alternatives",
+  "sugar sweetened beverage" = "sugar-sweetened beverages"
+)
+
+V(g)$label <- ifelse(V(g)$label %in% names(overrides),
+                     overrides[V(g)$label],
+                     V(g)$label)
+
+set.seed(123)
+ p <- ggraph(g, layout = "fr") +
+  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
+  scale_edge_width_continuous(name = "EMM magnitude") +
+  scale_edge_color_manual(name = "EMM direction",
+                          values = c("lightblue", "lightpink"),
+                          labels = c("<0", ">0")) +
+  geom_node_point(aes(shape = type, color = name), size = 6) +
+  scale_color_manual(values = setNames(V(g)$color, V(g)$name)) +
+  scale_shape_manual(name = "Variable",
+                     values = c("FALSE" = 16, "TRUE" = 17),
+                     labels = c("FALSE" = "PDI group", "TRUE" = "Country")) +
+  geom_node_text(aes(label = label), repel = TRUE, size = 3,
+                 max.overlaps = Inf, box.padding = 0.6, point.padding = 0.4,
+                 min.segment.length = 1, segment.size = 0.2,
+                 segment.color = "grey60", seed = 123) +
+  coord_cartesian(clip = "off") +
+  theme_void() +
+  theme(plot.margin = margin(20, 60, 20, 60)) +
+  guides(color = "none")
+
+p
+```
+
+#### Significant edges (p_adj<0.1)
+
+**Edge list**
+
+```{r}
+edges <- country_effects %>%
+  #filter(abs(emmean) > 0.1) %>%
+  filter(p_adj<0.1) %>%
+  dplyr::select(from = country, to = PDI_group, 
+         emmean = emmean) %>%
+  dplyr::mutate(from=as.character(from),
+         weight=abs(emmean))
+
+edges$from <- as.character(edges$from)
+edges$to   <- as.character(edges$to)
+```
+
+**Nodes table**
+
+```{r}
+library(igraph)
+library(ggraph)
+
+countries <- as.character(unique(edges$from))
+metabs <- as.character(unique(edges$to))
+
+nodes <- data.frame(
+  name = c(countries, metabs),
+  type = c(rep(TRUE, length(countries)), rep(FALSE, length(metabs))) # TRUE = country, FALSE = metabolite
+)
+```
+
+**Build igraph object**
+
+```{r}
+g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+```
+
+**Visualize**
+
+```{r,fig.height=5,fig.width=5}
+country_colors <- c(
+  BE = "#FDDA24",  # gold
+  CZ = "#11457E",  # blue
+  DE = "#000000",  # black
+  ES = "#630356",  # purple
+  CH = "#D52B1E"   # red
+)
+
+# Assign colors to nodes: countries get their color, metabolites gray
+V(g)$color <- ifelse(V(g)$type,
+                     country_colors[V(g)$name],
+                     "gray70")
+
+library(stringr)
+V(g)$label <- V(g)$name |>
+  str_remove("^PDI_") |>
+  str_remove("_avg$") |>
+  str_replace_all("_", " ")
+
+overrides <- c(
+  "legume vegetarian prot a" = "legumes & vegetarian protein alternatives",
+  "sugar sweetened beverage" = "sugar-sweetened beverages"
+)
+
+V(g)$label <- ifelse(V(g)$label %in% names(overrides),
+                     overrides[V(g)$label],
+                     V(g)$label)
+```
+
+```{r,fig.height=4,fig.width=7}
+set.seed(123)
+
+p <- ggraph(g, layout = "fr") +
+  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
+  scale_edge_width_continuous(name = "EMM magnitude") +
+  scale_edge_color_manual(name = "EMM direction",
+                          values = c("lightblue", "lightpink"),
+                          labels = c("<0", ">0")) +
+  geom_node_point(aes(shape = type, color = name), size = 6) +
+  scale_color_manual(values = setNames(V(g)$color, V(g)$name)) +
+  scale_shape_manual(name = "Variable",
+                     values = c("FALSE" = 16, "TRUE" = 17),
+                     labels = c("FALSE" = "PDI group", "TRUE" = "Country")) +
+  geom_node_text(aes(label = label), repel = TRUE, size = 3,
+                 max.overlaps = Inf, box.padding = 0.6, point.padding = 0.4,
+                 min.segment.length = 1, segment.size = 0.2,
+                 segment.color = "grey60", seed = 123) +
+  coord_cartesian(clip = "off") +
+  theme_void() +
+  theme(plot.margin = margin(20, 60, 20, 60)) +
+  guides(color = "none")
+p
+```
+
+```{r}
+f <- p
+save(f,file="../results/vegan/figures/F3d_CountryPDI.RData")
+```
+

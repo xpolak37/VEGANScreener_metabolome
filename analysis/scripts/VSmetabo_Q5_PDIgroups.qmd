@@ -1,0 +1,681 @@
+---
+title: "VEGANScreener + metabolomics"
+subtitle: "Q5: Associations between PDI groups and the metabolome."
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    df-print: paged
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+**This code is used to explore patterns in the metabolome profiles of vegans, particularly by exploring associations with their dietary records (PDI groups).**
+
+
+The main parts of the analysis is composed of:
+
+1. Canonical correlation analysis (CCA) - find linear combinations of **PDI groups** and metabolites that are maximally correlated. - SPCA
+
+2. Mantel test - provides a global similarity measure - SPCA
+
+3. Linear modeling - Metabolite ~ sex + bmi + age + country***PDI_group**
+
+4. Network analysis - bipartite graph. Edges of the graph correspond to the significant associations (Estimates from LM). 
+
+
+```{r,echo=FALSE}
+source("custom_functions_vegans.R")
+```
+
+# Import
+
+```{r}
+metadata_df <- read.table(
+  file =  "../../data/preprocessed/metadata_preprocessed_v3.tsv",
+  header = TRUE)  %>%
+  dplyr::filter(group=="VG")
+
+lcms_df <- read.table(
+  file= "../../data/preprocessed/metabolomics/lc_ms_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+nmr_df <- read.table(
+  file = "../../data/preprocessed/metabolomics/nmr_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+spca_integrated_df <-  read.table(
+  file = "../../data/preprocessed/metabolomics/spca_integrated_vegans_INT_v3.tsv",
+  check.names = FALSE)
+
+pdi_df <- as.data.frame(fread(
+  file = "../../data/preprocessed/dietary/pdi/pdi_avg_residuals_scaled_v3.tsv")) %>%
+  dplyr::select(-c(age,gender,bmi,eq_included_group,study_center,PDI_sweets_and_desserts_alt_avg))
+
+```
+
+
+```{r}
+metadata_scaled_df <- metadata_df
+metadata_scaled_df[,-c(1,3,5,6,8)] <- apply(metadata_df[,-c(1,3,5,6,8)],2,scale)
+metadata_scaled_df <- metadata_scaled_df %>%
+  mutate(sex=as.factor(sex),
+         country=as.factor(country),
+         group=as.factor(group),
+         diet_supplements=as.factor(diet_supplements))
+```
+
+
+# Descriptive statistics
+
+## Metadata
+
+Summary of counts per diet group, country and sex:
+
+```{r}
+metadata_df %>% dplyr::group_by(country,sex) %>% count()
+```
+
+Basic plots for visualizing the distribution of selected variables:
+
+```{r,fig.width=15,fig.height=8}
+plot_list <- list()
+name <- c("Age (years)","BMI","Vegan diet duration (years)","VS_total")
+i <- 1
+for (col in c("age","bmi","vegan_duration","VS_total")){
+  p <- ggplot(metadata_df) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(metadata_df[,col],na.rm = TRUE),2),"+-", round(sd(metadata_df[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+i <- 1
+name <- c("Sex","Country")
+for (col in c("sex","country")){
+  p <- ggplot(metadata_df) +
+        theme_minimal() + 
+     theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20)) +
+  geom_text(data=metadata_df %>% 
+              dplyr::group_by(!!sym(col)) %>% count(), aes(x=!!sym(col),y=n+10,label=n)) + 
+    stat_count(aes(x=!!sym(col)),fill="darkblue") + 
+    xlab(name[i]) 
+  
+  plot_list[[length(plot_list)+1]] <- p
+                 
+  i <- i+1                           
+}
+
+wrap_plots(plot_list)
+
+```
+
+## PDI
+
+Basic plots for visualizing the distribution:
+
+```{r,fig.width=25,fig.height=20}
+plot_list <- list()
+name <- colnames(pdi_df)[-1]
+i <- 1
+for (col in name){
+  p <- ggplot(pdi_df) + 
+    geom_histogram(aes(x=as.numeric(!!sym(col))),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(pdi_df[,col],na.rm = TRUE),2),"+-", round(sd(pdi_df[,col],na.rm = TRUE),2)))
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+
+**We will remove the animal-related groups.**
+
+```{r}
+pdi_df <- pdi_df %>% dplyr::select(-c(PDI_animal_fat_avg,PDI_eggs_avg,PDI_fish_or_seafood_avg,PDI_meat_avg,PDI_dairy_avg))
+```
+
+# Concatenated dataset
+
+```{r}
+concat_integrated_df <- cbind(lcms_df,nmr_df)
+```
+
+## Mantel test
+
+The Mantel test measures the correlation between two distance (or dissimilarity) matrices.
+
+In our case:
+
+Dataset 1: PDI profiles (e.g., pdi groups intake per client)
+Dataset 2: Metabolomic profiles (e.g., metabolite concentrations per client)
+
+The Mantel test asks: Are clients who eat similarly also similar in their metabolome?
+
+----------------------
+
+```{r}
+#nutri <- pdi_df[,c(-19,-20)] %>% column_to_rownames("study_id")
+nutri <- pdi_df[,-c(14:21)] %>% column_to_rownames("study_id")
+
+# delete the zero variance columns
+cols_to_del <- which(apply(nutri, 2, var, na.rm = TRUE) == 0)
+if (length(cols_to_del)>0){
+  nutri <- nutri[,-cols_to_del]
+
+}
+```
+
+### Euclidean distance
+
+**Simple Mantel test**
+
+The Mantel statistic r: 0.1303 (p=0.001).
+
+```{r}
+# Compute distance matrices (e.g., Euclidean)
+dist_nutri <- vegdist(nutri,method = "euclidean",na.rm = TRUE)
+dist_metabo <-  vegdist(concat_integrated_df,method="euclidean",na.rm = TRUE)
+
+anyNA(dist_nutri)
+anyNA(dist_metabo)
+
+# Mantel test
+mantel_result <- mantel(dist_nutri, dist_metabo, method = "spearman", 
+                        permutations = 999)
+print(mantel_result)
+```
+
+```{r}
+dist_nutri_df <- dist_nutri %>%
+  as.matrix() %>% 
+  as_tibble(rownames = "A") %>%
+  pivot_longer(cols = -A, names_to = "B", values_to = "nutri") %>%
+  mutate_if(is.character, str_trim)
+
+dist_metabo_df <- dist_metabo %>%
+  as.matrix() %>% 
+  as_tibble(rownames = "A") %>%
+  pivot_longer(cols = -A, names_to = "B", values_to = "metabo") %>%
+  mutate_if(is.character, str_trim)
+```
+
+```{r}
+combined <- inner_join(dist_nutri_df,dist_metabo_df, by=c("A","B")) %>%
+  dplyr::filter(A!=B) %>%
+  dplyr::filter(A < B)
+  
+ggplot(combined,aes(nutri,metabo)) + 
+  geom_point() + 
+  geom_smooth(se=FALSE)
+
+cor.test(combined$nutri,combined$metabo,method = "spearman")
+```
+
+**Partial Mantel test**
+
+The partial mantel is also a correlation test between two matrices, but controlling for the effect of a third distance matrix. This control is done by calculating the correlation between the residuals of each of the two main distance matrices after a linear regression on the third distance matrix.
+
+
+After adjusting for the country effect, the mantel statistic r: 0.1224  (p=0.001) 
+      
+```{r}
+country_vec <- metadata_df$country  # same order as in your data
+
+dist_country <- as.dist(
+  outer(country_vec, country_vec, FUN = Vectorize(function(x, y) as.numeric(x != y)))
+)
+
+mantel.partial(dist_nutri, dist_metabo, dist_country, permutations = 999,method = "spearman")
+
+```
+
+## PERMANOVA
+
+```{r}
+df_to_test <- merge(pdi_df,metadata_scaled_df,by="study_id",all=TRUE)
+```
+
+```{r}
+vars_to_test <- colnames(nutri)
+
+adonis_result_all <- data.frame(Var=NA,
+                                Df=NA,
+                                SumOfSqs=NA,
+                                R2=NA,
+                                `F`=NA,
+                                `Pr(>F)`=NA,
+                                check.names = FALSE)
+for (variable in vars_to_test){
+  metadata_sub_df <- df_to_test %>% dplyr::select(all_of(
+    c("study_id","sex", "bmi","age","VS_total","vegan_duration", variable))) %>% drop_na()
+  sub_spca <- spca_integrated_df[as.character(metadata_sub_df$study_id),]
+  
+  # Create Euclidean distance matrix
+  dist_mat <- vegdist(sub_spca, 
+                    method = "euclidean")
+  
+  # Test 
+  adonis_result <- adonis2(
+  as.formula(paste0("dist_mat ~ sex + bmi + age + vegan_duration + ", variable)),
+  data = metadata_sub_df , 
+  permutations = 999,
+  by="terms")
+
+  adonis_result_all <- rbind(adonis_result_all,as.data.frame(adonis_result) %>% 
+                               rownames_to_column("Var"))
+}
+
+
+adonis_result_all <- adonis_result_all %>% dplyr::filter(grepl("PDI_",Var))
+adonis_result_all$adjusted_p <- p.adjust(adonis_result_all$`Pr(>F)`,method = "BH")
+
+knitr::kable(adonis_result_all)
+
+```
+
+```{r}
+labels <- c(
+  "PDI_legume_vegetarian_prot_a_avg" = "Legumes & vegetarian protein alternatives",
+  "PDI_sweets_and_desserts_avg"      = "Sweets & desserts",
+  "PDI_sugar_sweetened_beverage_avg" = "Sugar-sweetened beverages",
+  "PDI_fruits_avg" = "Fruits",
+  "PDI_vegetables_avg" = "Vegetables",
+  "PDI_nuts_avg" = "Nuts",
+  "PDI_whole_grains_avg" = "Whole grains",
+  "PDI_refined_grains_avg" = "Refined grains",
+  "PDI_vegetable_oils_avg" = "Vegetable oils",
+  "PDI_tea_and_coffee_avg" = "Tea & coffee",
+  "PDI_fruit_juices_avg" = "Fruit juices",
+  "PDI_potatoes_avg" = "Potatoes",
+  "PDI_nuts_avg" = "Nuts")
+
+adonis_result_all$Var <- labels[adonis_result_all$Var]
+adonis_result_all$Category <- c("unhealthy","healthy","healthy","healthy",
+                                "unhealthy","unhealthy","unhealthy","unhealthy",
+                                "healthy","healthy","healthy","healthy")
+
+adonis_result_all$Var <- factor(
+  adonis_result_all$Var,
+  levels = adonis_result_all$Var[order(adonis_result_all$R2,decreasing = TRUE)]
+)
+
+p_permanova <- ggplot(adonis_result_all, aes(x = Var, y = R2*100, fill = Category)) +
+  geom_col(width = 0.65, colour = "white", linewidth = 0.3) +
+  # mark non-significant bars with "ns"
+  geom_text(data = filter(adonis_result_all, adjusted_p > 0.05),
+            aes(label = "ns", y = R2*100 + 0.05),
+            size = 3, colour = "grey40", fontface = "italic") +
+  scale_fill_manual(values = c("healthy"= "#66c2a5","unhealthy"= "#f46d43"), guide = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = NULL, y = "R² (%)") +
+  theme_minimal(base_size = 11) +
+  theme(
+    strip.text       = element_text(face = "bold", size = 10),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.x      = element_text(face = "bold",angle=80,hjust = 1),
+    plot.title       = element_blank()
+  ) 
+p_permanova
+```
+
+## Network analysis 
+
+We want to model each metabolite as a function of sex, BMI, age, country, and each food group. Keep the estimated effect (and significance) of each food group on each metabolite.Then, we will use those significant effects to construct a bipartite network, where:
+
+- one node type = metabolites
+
+- other node type = food groups
+
+- edges = significant relationships from the regression models.
+
+Then we’ll analyze and visualize that network.
+
+```{r}
+nutri <- pdi_df[,-c(14:21)] %>% column_to_rownames("study_id")
+
+# delete the zero variance columns
+cols_to_del <- which(apply(nutri, 2, var, na.rm = TRUE) == 0)
+if (length(cols_to_del)>0){
+  nutri <- nutri[,-cols_to_del]
+}
+
+# delete the zero variance columns
+nutri <- nutri %>%
+  rownames_to_column("study_id")
+
+metadata_for_lm <- merge(nutri,metadata_scaled_df,by="study_id",all=TRUE)
+
+concat_for_uni <- merge(
+  concat_integrated_df %>% rownames_to_column("study_id"),
+  metadata_for_lm,
+  by="study_id",all = TRUE)
+```
+
+### LM
+
+For each metabolite and PDI group, calculate: 
+
+Metabolite ~ sex + bmi + age + country + PDI_group
+
+```{r}
+results_list <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_netglm(x,concat_for_uni,
+                                           tested_variable = "pdi_groups"))
+
+results_df <- do.call(rbind, results_list)
+
+results_df <- results_df %>%
+  dplyr::mutate(p_adj = p.adjust(`p.value`, method = "BH"))
+
+pdi_effects <- results_df %>% dplyr::filter(term %in% colnames(nutri))
+
+concat_significant_cat <-  pdi_effects %>%
+  filter(p_adj < 0.05)
+
+concat_significant_cat
+```
+
+```{r}
+results_all <- pdi_effects
+
+# save 
+write.table(results_all,"../results/vegan/Q5_PDIgroups/lm_continous_all.tsv",
+            row.names = FALSE,
+            quote=FALSE,
+            sep="\t")
+```
+
+### Graph construction
+
+**Edge list**
+
+```{r}
+edges <- pdi_effects %>%
+  dplyr::filter(p_adj < 0.05) %>%
+  dplyr::select(from = term, to = Metabolite, 
+         estimate = estimate) %>%
+  dplyr::mutate(from=as.character(from),
+         weight=abs(estimate))
+
+edges$from <- as.character(edges$from)
+edges$to   <- as.character(edges$to)
+```
+
+**Nodes table**
+
+```{r}
+pdis <- as.character(unique(edges$from))
+metabs <- as.character(unique(edges$to))
+
+nodes <- data.frame(
+  name = c(pdis, metabs),
+  type = c(rep(TRUE, length(pdis)), rep(FALSE, length(metabs))) # TRUE = tertile, FALSE = metabolite
+)
+```
+
+**Build igraph object**
+
+```{r}
+g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+```
+
+**Visualize**
+
+```{r}
+categories <- list(
+  "healthy" = c("PDI_fruits_avg",
+                "PDI_legume_vegetarian_prot_a_avg",
+                "PDI_nuts_avg",
+                "PDI_tea_and_coffee_avg",
+                "PDI_vegetable_oils_avg",
+                "PDI_vegetables_avg",
+                "PDI_whole_grains_avg"),
+  
+  "unhealthy" = c("PDI_fruit_juices_avg",
+                "PDI_refined_grains_avg",
+                "PDI_potatoes_avg",
+                "PDI_sugar_sweetened_beverage_avg",
+                "PDI_sweets_and_desserts_avg",
+                "PDI_sweets_and_desserts_alt_avg"))	
+```
+
+```{r,fig.height=6,fig.width=6}
+set.seed(123)
+pdi_colors <- colorRampPalette(
+  c("#2596be","#9e0142","#d53e4f","#f46d43",
+    "#fdae61","#e6f598","#66c2a5","#5e4fa2"))(12)
+
+pdi_colors <- c(rep("#66c2a5",length(categories$healthy)),
+                rep("#f46d43",length(categories$unhealthy)))
+
+names(pdi_colors) <- c(categories$healthy,categories$unhealthy)
+
+# Assign colors to nodes: countries get their color, metabolites gray
+V(g)$color <- ifelse(V(g)$type,
+                     pdi_colors[V(g)$name],
+                     "gray70")
+
+node_labels <- c(
+  "PDI_legume_vegetarian_prot_a_avg" = "Legumes & vegetarian protein alternatives",
+  "PDI_sweets_and_desserts_avg"      = "Sweets & desserts",
+  "PDI_sugar_sweetened_beverage_avg" = "Sugar-sweetened beverages",
+  "PDI_fruits_avg" = "Fruits",
+  "PDI_vegetables_avg" = "Vegetables",
+  "PDI_nuts_avg" = "Nuts",
+  "PDI_whole_grains_avg" = "Whole grains",
+  "PDI_refined_grains_avg" = "Refined grains",
+  "PDI_vegetable_oils_avg" = "Vegetable oils",
+  "PDI_tea_and_coffee_avg" = "Tea & coffee",
+  "PDI_fruit_juices_avg" = "Fruit juices",
+  "PDI_nuts_avg" = "Nuts",
+  "Indoleacrylic.acid"            = "Indoleacrylic acid",
+    "Acetylornithin"                = "Acetylornithine",        # NB: source typo (missing 'e'), not a dot issue
+    "Ergothionenine"                = "Ergothioneine",          # NB: source typo, not a dot issue
+    "Betaine"                       = "Betaine",
+    "Asparagine"                    = "Asparagine",
+    "Formate"                       = "Formate",
+    "Glutamylglutamine"             = "Glutamylglutamine",
+    "Hydroxydecanoylcarnitine"      = "Hydroxydecanoylcarnitine",
+    "Hydroxyoctanoylcarnitine"      = "Hydroxyoctanoylcarnitine",
+    "Glycine"                       = "Glycine",
+    "3-Methyl-2-oxovalerate"        = "3-Methyl-2-oxovalerate",
+    "Acetate"                       = "Acetate",
+    "Citrate"                       = "Citrate",
+    "Octenoylcarnitine"             = "Octenoylcarnitine",
+    "Dodecenoylcarnitine"           = "Dodecenoylcarnitine",
+    "Dimethylamine"                 = "Dimethylamine",
+    "Uric.acid"                     = "Uric acid",
+    "Alanine"                       = "Alanine",
+    "3-Hydroxybutyrate"             = "3-Hydroxybutyrate",
+    "Glucose"                       = "Glucose",
+    "Hydroxybutyrylcarnitine"       = "Hydroxybutyrylcarnitine",
+    "Lactate"                       = "Lactate",
+    "Tyrosine"                      = "Tyrosine",
+    "Inosine"                       = "Inosine",
+    "Histidine"                     = "Histidine",
+    "Phenylalanine"                 = "Phenylalanine",
+    "Threonine"                     = "Threonine",
+    "Phenylalanylphenylalanine"     = "Phenylalanylphenylalanine",
+    "Methylguanidine"               = "Methylguanidine",
+    "Glycerophosphocholine"         = "Glycerophosphocholine",
+    "Acetone"                       = "Acetone",
+    "Caffeine"                      = "Caffeine",
+    "Hexanoylcarnitine"             = "Hexanoylcarnitine",
+    "Phenylbutyrylglutamine"        = "Phenylbutyrylglutamine",
+    "Trimethyllysine"               = "Trimethyllysine",
+    "Isoleucine"                    = "Isoleucine",
+    "Carnitine"                     = "Carnitine",
+    "2-Oxoisocaproate"              = "2-Oxoisocaproate",
+    "Propionylcarnitine"            = "Propionylcarnitine",
+    "Glutamine"                     = "Glutamine",
+    "Creatinine"                    = "Creatinine",
+    "Valine"                        = "Valine",
+    "Butyrylcarnitine"              = "Butyrylcarnitine",
+    "Glutarylcarnitine"             = "Glutarylcarnitine",
+    "2-Hydroxybutyrate"             = "2-Hydroxybutyrate",
+    "Pyruvate"                      = "Pyruvate",
+    "Lysine"                        = "Lysine",
+    "Tryptophan"                    = "Tryptophan",
+    "Diaminonaphthalene"            = "Diaminonaphthalene",
+    "Ascorbate"                     = "Ascorbate",
+    
+    # ---- lipids: dots restored to ( ) and : ----
+    "PC.36.2."                      = "PC(36:2)",
+    "LysoPC.18.2."                  = "LysoPC(18:2)",
+    "SM.d42.2."                     = "SM(d42:2)",
+    "PC.P.38.4."                    = "PC(P-38:4)",
+    "PC.38.4."                      = "PC(38:4)",
+    "SM.d38.2."                     = "SM(d38:2)",
+    "PC.36.4."                      = "PC(36:4)",
+    "SM.d34.1."                     = "SM(d34:1)",
+    "LysoPC.14.0."                  = "LysoPC(14:0)",
+    "PC.34.1."                      = "PC(34:1)",
+    "PC.40.6."                      = "PC(40:6)",
+    "LysoPC.22.6."                  = "LysoPC(22:6)",
+    "PA.44.5."                      = "PA(44:5)",
+    "PC.32.1."                      = "PC(32:1)",
+    "LysoPC.P.16.0."                = "LysoPC(P-16:0)",
+    "LysoPC.17.0."                  = "LysoPC(17:0)",
+    "SM.d32.1."                     = "SM(d32:1)",
+    "SM.d33.1."                     = "SM(d33:1)",
+    
+    # ---- acylcarnitine chain-length annotations ----
+    "Acylcarnitine..C8."            = "Acylcarnitine (C8)",
+    "Acylcarnitine..C5."            = "Acylcarnitine (C5)",
+  
+  # ---- VERIFY THESE: adducts / ambiguous combined names ----
+  # The reconstruction below is my best guess; confirm against your raw list.
+  "Citrulline..M.Na."             = "Citrulline (M+Na)",
+  "CE.18.2..M.NH4.."              = "CE(18:2)[M+NH4]",
+  "PC.20.3.OH.P.18.1."            = "PC(20:3-OH/P-18:1)",
+  "PC.P.38.4..PC.O.38.5."         = "PC(P-38:4)/PC(O-38:5)")
+
+
+# create a label attribute; fall back to the original name if not in the dict
+V(g)$label <- ifelse(V(g)$name %in% names(node_labels),
+                     node_labels[V(g)$name],
+                     V(g)$name)
+
+set.seed(123)
+p <- ggraph(g, layout = "fr") +
+  geom_edge_link(aes(width = abs(weight), color = estimate > 0), alpha = 0.7) +
+  scale_edge_width_continuous(name = "EMM magnitude") +
+  scale_edge_color_manual(
+    values = c("lightblue", "lightpink"), 
+    name="EMM direction",
+    labels = c("<0", ">0")) +
+  geom_node_point(aes(shape=type,color = name), size = 6,,name="Node",labels=c("Metabolite","PDI group")) +
+  scale_color_manual(values = setNames(V(g)$color, V(g)$name)) +  # node colors
+  geom_node_text(aes(label = label), repel = TRUE, size = 3,
+                 max.overlaps = Inf, box.padding = 0.6, point.padding = 0.4,
+                 min.segment.length = 1, segment.size = 0.2,
+                 segment.color = "grey60", seed = 123) + 
+  scale_shape_manual(name = "Variable",
+                     values = c("FALSE" = 16, "TRUE" = 17),
+                     labels = c("TRUE" = "PDI group", "FALSE" = "Metabolite"))  +
+  guides(color = "none") + theme_void()
+
+p
+
+```
+
+```{r}
+f <- p
+save(f,file="../results/vegan/figures/F5e_Network.RData")
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q5_PDIgroups/network_pdi.pdf",height = 6,width = 6)
+p
+dev.off()
+```
+
+### Degree calculation
+
+Interpretation
+
+*High-degree PDI nodes (type == TRUE)*
+
+→ These dietary variables are associated with many metabolites
+→ Could suggest broad metabolic influence
+
+*High-degree metabolite nodes (type == FALSE)*
+
+→ These metabolites are associated with multiple food groups
+→ Potential nutritional biomarkers
+
+
+```{r}
+# Calculate degree
+deg <- degree(g, mode = "all")
+
+# Add to node dataframe
+node_degree_df <- data.frame(
+  name = names(deg),
+  degree = deg,
+  type = V(g)$type
+)
+
+# Separate interpretation
+food_nodes <- node_degree_df %>% dplyr::filter(type == TRUE)
+metabolite_nodes <- node_degree_df %>% dplyr::filter(type == FALSE)
+
+food_nodes %>% arrange(desc(degree))
+metabolite_nodes %>% arrange(desc(degree))
+```
+
+**Weighted degree**
+- Should reflect cumulative association magnitude, not just number of links.
+
+```{r}
+strength_vals <- strength(g, weights = E(g)$weight)
+
+node_strength_df <- data.frame(
+  name = names(strength_vals),
+  strength = strength_vals,
+  type = V(g)$type
+)
+
+# Separate interpretation
+food_nodes <- node_strength_df %>% dplyr::filter(type == TRUE)
+metabolite_nodes <- node_strength_df %>% dplyr::filter(type == FALSE)
+
+food_nodes %>% arrange(desc(strength))
+metabolite_nodes %>% arrange(desc(strength))
+```

@@ -1,0 +1,660 @@
+---
+title: "Veganscreener metabolomics - Figures"
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+This code shows all the figures reported in the original publication of this study. 
+
+```{r}
+library(ggplot2)
+library(patchwork)
+library(ggplotify)
+source("custom_functions_vegans.R")
+```
+
+# Figure 2
+
+```{r}
+load("../results/vegan/figures/F2a_permanovaVar.RData")
+f2a <- f
+load("../results/vegan/figures/F2b_PcaCorr.RData")
+f2b <- f 
+```
+
+```{r,fig.width=15,fig.height=7}
+(f2a|f2b)
+```
+
+```{r}
+labels = c("country_ES" = "Country (ES)",
+           "country_CH" = "Country (CH)",
+           "country_DE" = "Country (DE)",
+           "country_BE" = "Country (BE)",
+          "country_CZ" = "Country (CZ)",
+          "country" = "Country",
+           "VS_total" = "Veganscreener score",
+          "VS_total_plus" = "Veganscreener score (+)",
+            "VS_total_minus" = "Veganscreener score (-)",
+           "sex" = "Sex",
+           "UPF_perc_avg" = "UPF",
+           "age" = "Age",
+            "bmi" = "BMI",
+          "diet_supplements" = "Supplementation",
+          "vegan_duration" = "Vegan diet duration",
+           "pdi_an_avg" = "PDI",
+          "updi_an_avg" = "uPDI",
+          "hpdi_an_avg" = "hPDI")
+
+f2a <- f2a + scale_x_discrete(labels=labels) + ggtitle("")
+f2b <- f2b + scale_y_discrete(labels=labels) + ggtitle("") 
+
+```
+
+```{r,fig.width=14,fig.height=7}
+(f2a | f2b) + 
+  plot_layout(widths = c(1, 1.5)) & 
+  plot_annotation(tag_levels = 'A') &
+  theme(plot.tag = element_text(size = 20, face = 'bold')) 
+
+```
+
+```{r}
+p <- (f2a | f2b) + 
+  plot_layout(widths = c(1, 1.5)) & 
+  plot_annotation(tag_levels = 'A') &
+  theme(plot.tag = element_text(size = 20, face = 'bold')) 
+
+ggsave(plot=p,"../results/vegan/figures/Figure_2.png", height=7,width=14)
+```
+
+# Figure 3
+
+```{r}
+load("../results/vegan/figures/F3a_ROCcountry.RData")
+f3a <- f
+load("../results/vegan/figures/F3b_CMcountry.RData")
+f3b <- f 
+load("../results/vegan/figures/F3c_CountryHeatmap.RData")
+f3c <- f 
+load("../results/vegan/figures/F3d_CountryPDI.RData")
+f3d <- f 
+```
+
+```{r,fig.width=12,fig.height=12}
+design <- "
+AB
+AB
+C#
+CD
+CD
+C#
+"
+
+(f3a_free <- free(f3a + ggtitle(""), side = "l"))
+f3a_free + f3b + f3c + f3d +
+  plot_layout(design  = design,
+              widths  = c(1, 2),     # NOW these actually apply
+              heights = c(1,1, 0.3,1, 1,1,1)) +  # row1 = A/B; C spans rows 2–3; D = row 2 only
+  plot_annotation(tag_levels = "A") &
+  theme(plot.margin = margin(3, 3, 3, 3),
+        plot.tag = element_text(face = "bold", size = 20))
+```
+
+
+```{r}
+p <- f3a_free + f3b + f3c + f3d +
+  plot_layout(design  = design,
+              widths  = c(1, 2),     # NOW these actually apply
+              heights = c(1,1, 0.3,1, 1,1,1)) +  # row1 = A/B; C spans rows 2–3; D = row 2 only
+  plot_annotation(tag_levels = "A") &
+  theme(plot.margin = margin(3, 3, 3, 3),
+        plot.tag = element_text(face = "bold", size = 20))
+```
+
+```{r}
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_3.png", height=12,width=12)
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_3.pdf", height=12,width=12)
+```
+
+# Figure 4
+
+## Prepare
+
+```{r}
+load("../intermediate_files/models/adjusted_vstotal_model_vegan/rf_model.RData")
+vs_model <- rf_model
+load("../intermediate_files/models/adjusted_pdi_model_vegan/rf_model.RData")
+pdi_model <- rf_model
+load("../intermediate_files/models/adjusted_hpdi_model_vegan/rf_model.RData")
+hpdi_model <- rf_model
+load("../intermediate_files/models/adjusted_updi_model_vegan/rf_model.RData")
+updi_model <- rf_model
+load("../intermediate_files/models/adjusted_upf_model_vegan/rf_model.RData")
+upf_model <- rf_model
+
+model_objects <- list(vs_model,updi_model,upf_model)
+names(model_objects) <- c("Veganscreener score", "uPDI","UPF")
+
+```
+
+```{r}
+source("custom_functions_vegans.R")
+```
+
+```{r}
+make_multi_roc_curve_indexes <- function(model_objects,CI=FALSE){
+  roc_c <- ggplot()
+  colors <- c("darkgreen","#F2A93B", "#0072B2")
+  #colors <- c("darkorange", "#C9884B","#F2A93B")
+  #lts  <- c("solid",  "dashed", "dotted")
+
+  names(colors) <- names(model_objects)
+  groups <- names(model_objects)
+  for (group in groups){
+    model_object <- model_objects[[group]]
+    color <- colors[group]
+    if (CI){
+    
+    auc_val <- model_object$model_summary$auc
+    aucs <- sapply(model_object$kfold_rocobjs,function(df) df$auc)
+    q1_auc <- quantile(aucs, probs = 0.025)
+    q3_auc <- quantile(aucs, probs = 0.975)
+    
+    differences <- abs(aucs - q1_auc)
+    min_auc <- which.min(differences)
+    
+    differences <- abs(aucs - q3_auc)
+    max_auc <- which.min(differences)
+    
+    differences <- abs(aucs - auc_val)
+    true_auc <- which.min(differences)
+    
+    c <- model_object$kfold_rocobjs[[true_auc]]
+    ggroc_data_c <- ggroc(c)$data
+    
+    # Create a common set of x-axis points
+    x_common <- seq(0, 1, length.out = 100)
+    my_df <- data.frame(x=x_common)
+    
+    for (j in 1:length(aucs)){
+      # get ggrocdata
+      ggroc_data <- ggroc(model_object$kfold_rocobjs[[j]])$data
+      
+      # adjust the lowest and highest numbers
+      ggroc_data$`1-specificity` <- 
+        ggroc_data$`1-specificity` + (1:nrow(ggroc_data))/(1e+20)
+      ggroc_data$`1-specificity`[nrow(ggroc_data)] <- 1
+      
+      # approximation (for equal axis coordinates)
+      y_aprox <- approx(
+        ggroc_data$`1-specificity`, 
+        ggroc_data$sensitivity, xout = x_common)$y
+      
+      my_df <- cbind(my_df,y_aprox)
+    }
+    
+    my_df <- my_df %>% column_to_rownames("x")
+    q1_y <- c()
+    q2_y <- c()
+    q3_y <- c()
+    for (j in 1:length(x_common)){
+      q1_y <- c(q1_y,quantile(as.numeric(my_df[j,]), 
+                              probs = 0.025,na.rm=TRUE))
+      q2_y <- c(q2_y,mean(as.numeric(my_df[j,])))
+      q3_y <- c(q3_y,quantile(as.numeric(my_df[j,]), 
+                              probs = 0.975,na.rm=TRUE))
+    }
+    df <- data.frame(x = x_common, 
+                     y1 = q1_y, 
+                     y2 = q3_y, 
+                     y3 = q2_y,
+                     Model=group)
+    df[is.na(df)] <- 0
+    
+    my_color <- color
+    
+    roc_c <- roc_c + 
+      geom_ribbon(data=df,
+                  aes(x =x,ymin = pmin(y1, y2), ymax = pmax(y1, y2),
+                      fill=Model), 
+                  alpha = 0.3,
+                  show.legend = TRUE) +
+      geom_line(data=df,aes(x=x, y = y3, color=Model),
+                size=1.5) + 
+      theme_minimal() + 
+      theme(panel.border = 
+              element_rect(color = "black", fill = NA, size = 0),
+            panel.grid = element_blank(),
+            axis.ticks.x = 
+              element_line(size=0.3,color = "black"),
+            axis.ticks.y = 
+              element_line(size=0.3,color="black"),
+            axis.ticks.length = unit(4,"pt"),
+            axis.text=element_text(face="bold"),
+            axis.title = element_text(face="bold",size=15),
+            legend.position = c(0.98, 0.02),
+            legend.justification = c("right", "bottom")) + 
+      ylab("Sensitivity") + xlab("1-specificity") + 
+      scale_color_manual(values=colors) + 
+      scale_fill_manual(values=colors)
+ 
+  }
+  }
+  
+  
+  return(roc_c)
+}
+```
+
+```{r}
+p <- make_multi_roc_curve_indexes(model_objects,CI=TRUE)
+```
+
+```{r}
+f <- p
+save(f,file="../results/vegan/figures/F4c_ROC.RData")
+```
+
+```{r}
+load("../results/vegan/figures/FS_ROC.RData")
+```
+
+```{r}
+f <- p
+save(f,file="../results/vegan/figures/FS_ROC.RData")
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3b_UPF/roc_all.pdf",width = 6,height = 5)
+p
+dev.off()
+```
+
+```{r}
+# ============================================================
+# Figure: Metabolomic Associations of VGscore and PDI Sub-indices
+# Panel A: PERMANOVA R² and AUC grouped bar chart
+# Panel B: Metabolite direction heatmap
+# ============================================================
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)
+library(ggtext)
+
+index_colors <- c(
+  "Veganscreener score"    = "darkgreen",
+  "Veganscreener score (+)"   = "#74C69D",
+  "Veganscreener score (-)"   = "#B7E4C7",
+  "PDI"   = "darkorange",
+  "hPDI"  = "#C9884B",
+  "uPDI"  = "#F2A93B",
+  "UPF" = "#0072B2"
+)
+
+# ---- PANEL A DATA ------------------------------------------
+perf_data <- tibble(
+  Index   = factor(rep(c("Veganscreener score","Veganscreener score (+)","Veganscreener score (-)", "PDI","hPDI","uPDI","UPF"), 2),
+                   levels = c("Veganscreener score","Veganscreener score (+)","Veganscreener score (-)", "PDI","hPDI","uPDI","UPF")),
+  Metric  = rep(c("PERMANOVA R² (%)", "AUC"), each = 7),
+  Value   = c(2.60, 1.80, 2.27, 0.22 , 2.01, 2.12, 1.49, # PERMANOVA
+              0.74, 0.69, 0.64, 0.48, 0.66, 0.69, 0.62), # AUC
+  CI_low  = c(rep(NA, 7),   # no CI for PERMANOVA
+              0.64, 0.61, 0.54, 0.37, 0.62, 0.60, 0.46),  # AUC CIL
+  CI_high = c(rep(NA, 7),
+              0.82, 0.78, 0.73, 0.58, 0.75, 0.78, 0.69),  # AUC CIU
+  Sig     = c(TRUE, TRUE, TRUE, FALSE, TRUE, TRUE, TRUE,
+              NA,   NA,   NA,   FALSE,   NA,   NA, FALSE)
+)
+
+# reference lines per facet
+ref_lines <- tibble(
+  Metric = c("PERMANOVA R² (%)", "AUC"),
+  yref   = c(NA, 0.5)
+)
+
+p_permanova <- ggplot(perf_data %>% dplyr::filter(Metric=="PERMANOVA R² (%)"), aes(x = Index, y = Value, fill = Index)) +
+  geom_col(width = 0.65, colour = "white", linewidth = 0.3) +
+  # mark non-significant bars with "ns"
+  geom_text(data = filter(perf_data, Metric == "PERMANOVA R² (%)", !Sig),
+            aes(label = "ns", y = Value + 0.05),
+            size = 3, colour = "grey40", fontface = "italic") +
+  scale_fill_manual(values = index_colors, guide = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = NULL, y = "R² (%)") +
+  theme_minimal(base_size = 11) +
+  theme(
+    strip.text       = element_text(face = "bold", size = 10),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.x      = element_text(face = "bold",angle=60,hjust = 1),
+    plot.title       = element_blank()
+  ) 
+
+p_auc <- ggplot(perf_data %>% dplyr::filter(Metric=="AUC"), aes(x = Index, y = Value, fill = Index)) +
+  geom_col(width = 0.65, colour = "white", linewidth = 0.3) +
+  geom_errorbar(
+    data = filter(perf_data, Metric == "AUC"),
+    aes(ymin = CI_low, ymax = CI_high),
+    width = 0.22, colour = "grey25", linewidth = 0.6
+  ) +
+  # mark non-significant bars with "ns"
+  geom_text(data = filter(perf_data, Metric == "AUC", !Sig),
+            aes(label = "ns", y = CI_high + 0.05),
+            size = 3, colour = "grey40", fontface = "italic") +
+  scale_fill_manual(values = index_colors, guide = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(x = NULL, y = "AUC") +
+  theme_minimal(base_size = 11) +
+  theme(
+    strip.text       = element_text(face = "bold", size = 10),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank(),
+    axis.text.x      = element_text(face = "bold",angle=60,hjust = 1),
+    plot.title       = element_blank()
+  ) 
+
+```
+
+```{r}
+f <- p_permanova
+save(f,file="../results/vegan/figures/F4a_R2.RData")
+
+f <- p_auc
+save(f,file="../results/vegan/figures/F4b_AUC.RData")
+```
+
+## Plot
+
+```{r}
+load("../results/vegan/figures/F4a_R2.RData")
+f4a <- f
+load("../results/vegan/figures/F4b_AUC.RData")
+f4b <- f 
+load("../results/vegan/figures/F4c_ROC.RData")
+f4c <- f 
+```
+
+```{r,fig.height=4,fig.width=12}
+design <- "
+ABC
+"
+f4a_free <- free(f4a, side = "lb") 
+f4b_free <- free(f4b, side = "lb") 
+f4c_free <- free(f4c, side = "lb") 
+
+p <- f4a_free + f4b_free + f4c_free + 
+  plot_layout(design  = design,
+              widths  = c(0.8, 0.9,1)) + 
+  plot_annotation(tag_levels = "A") &
+  theme(plot.margin = margin(3, 3, 3),
+        plot.tag    = element_text(face = "bold", size = 20))
+
+p
+```
+
+```{r}
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_4.png", height=4,width=12)
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_4.pdf", height=4,width=12)
+```
+
+# Figure 5
+
+## Prepare
+
+```{r}
+# ---- colour palette ----------------------------------------
+col_up   <- "#d73027"   # warm orange  → positive association
+col_down <- "#4575b4"   # steel blue   → negative association
+col_na   <- "grey92"   # light grey   → not significant
+
+```
+
+```{r}
+vs_total <- fread("../results/vegan/Q2_VStotal/lm_continous.tsv")
+vs_total_plus <- fread("../results/vegan/Q2_VStotal_plus/lm_continous.tsv")
+vs_total_minus <- fread("../results/vegan/Q2_VStotal_minus/lm_continous.tsv")
+pdi <- fread("../results/vegan/Q3a_PDI//lm_continous.tsv")
+hpdi <- fread("../results/vegan/Q3a_hPDI/lm_continous.tsv")
+updi <- fread("../results/vegan/Q3a_uPDI/lm_continous.tsv")
+upf <- fread("../results/vegan/Q3b_UPF//lm_continous.tsv")
+```
+
+```{r}
+all_df <- rbind(vs_total,vs_total_plus,vs_total_minus,
+                pdi,hpdi,updi,upf)
+
+var_levels <- c(
+  "VS_total"       = "Veganscreener score",
+  "VS_total_plus"  = "Veganscreener score (+)",
+  "VS_total_minus" = "Veganscreener score (-)",
+  "pdi_an_avg"            = "PDI",
+  "hpdi_an_avg"           = "hPDI",
+  "updi_an_avg"           = "uPDI",
+  "UPF_perc_avg"   = "UPF"
+)
+
+metabolite_labels <- fix_labels(NULL,get_labels = TRUE)
+wide_df <- all_df %>%
+  mutate(
+    # direction from the Estimate, only when significant
+    direction = case_when(
+      Estimate > 0 ~  1L,
+      Estimate < 0 ~ -1L,
+      TRUE                             ~  0L
+    ),
+    Metabolite = recode(metabolite, !!!metabolite_labels), 
+    variable   = recode(variable,   !!!var_levels)
+  ) %>%
+  dplyr::select(Metabolite, variable, direction) %>%
+  pivot_wider(names_from = variable, values_from = direction,
+              values_fill = 0L) %>%                          # missing combos -> 0
+  dplyr::select(Metabolite, `Veganscreener score`, `Veganscreener score (+)`, `Veganscreener score (-)`,
+         PDI, hPDI, uPDI,UPF)
+```
+
+```{r}
+# order metabolites by biological cluster (manual grouping)
+cluster_order <- c(
+  # omega-3 / phospholipids (positive)
+  "LysoPC (22:6)", "PC (40:6)", "PA (44:5)", "LysoPC (17:0)",
+  # antioxidant / gut microbiome
+  "Indoleacrylic acid", "Ergothioneine", "Acetylornithine",
+  "Glutamine", "Phenylbutyrylglutamine", "3-Methyl-2-oxovalerate",
+  "Glutarylcarnitine",
+  # saturated / atherogenic lipids (negative)
+  "PC (34:1)", "PC (32:1)", "SM (d42:2)", "SM (d38:2)",
+  "SM (d32:1)", "SM (d34:1)",
+  # acylcarnitines / other
+  "Octenoylcarnitine", "Propionylcarnitine", "Caffeine"
+)
+
+cluster_order <- c(
+  # Omega-3 / phospholipids (positive)
+  "LysoPC(22:6)","PC(40:6)",
+  "PA(44:5)", "LysoPC(17:0)",           
+  # Antioxidant / gut-microbiome
+  "Indoleacrylic acid", "Ergothioneine", "Acetylornithine", 
+  "Glutamine", "Phenylbutyrylglutamine",
+  "3-Methyl-2-oxovalerate", "Glutarylcarnitine",  
+  # Saturated / atherogenic lipids (negative)
+  "PC(34:1)", "PC(32:1)", "SM(d42:2)", 
+  "SM(d38:2)","SM(d32:1)", "SM(d34:1)", 
+  # Acylcarnitines / other
+  "Octenoylcarnitine","Propionylcarnitine", 
+  "Caffeine", "Diaminonaphthalene"
+)
+
+heat_long <- wide_df %>%
+  pivot_longer(-Metabolite, names_to = "Index", values_to = "Direction") %>%
+  mutate(
+    Metabolite = factor(Metabolite, levels = rev(cluster_order)),
+    Index      = factor(Index, levels = rev(c("Veganscreener score","Veganscreener score (+)","Veganscreener score (-)","PDI","hPDI","uPDI","UPF"))),
+    Fill       = case_when(
+      Direction ==  1 ~ "UP",
+      Direction == -1 ~ "DOWN",
+      TRUE            ~ "ns"
+    )
+  )
+
+panel_B <- ggplot(heat_long, aes(x = Index, y = Metabolite)) +
+  geom_tile(aes(fill = Fill), colour = "white", linewidth = 0.5) +
+  geom_point(
+    data = subset(heat_long, Fill %in% c("UP", "DOWN")),
+    aes(shape = Fill),
+    fill = "black", colour = "black", size = 2.2
+  ) +
+  scale_fill_manual(
+    values = c("UP" = col_up, "DOWN" = col_down, "ns" = col_na),
+    name   = "Estimate",
+    labels = c("UP" = "Positive", "DOWN" = "Negative", "ns" = "Not significant")
+  ) +
+  scale_shape_manual(values = c("UP" = 24, "DOWN" = 25), guide = "none") +
+  coord_flip() +
+  #geom_vline(xintercept = 3.5, colour = "grey30", linewidth = 0.8) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x     = element_text(size = 9, angle = 45, hjust = 1),
+    axis.text.y     = element_text(size = 9, face = "bold"),
+    legend.position = "right",
+    legend.title    = element_text(face = "bold", size = 9),
+    panel.grid      = element_blank()
+  )
+
+```
+
+```{r}
+panel_B
+```
+
+```{r}
+f <- panel_B
+save(f,file="../results/vegan/figures/F5a_AllHeatmap.RData")
+```
+
+## Plot
+
+```{r}
+load("../results/vegan/figures/F5a_AllHeatmap.RData")
+f5a <- f
+load("../results/vegan/figures/F5a_VMI.RData")
+f5b <- f 
+load("../results/vegan/figures/F5c_hPMI.RData")
+f5c <- f 
+load("../results/vegan/figures/F5d_uPMI.RData")
+f5d <- f 
+load("../results/vegan/figures/F5e_Network.RData")
+f5e <- f 
+```
+
+```{r,fig.height=7,fig.width=14}
+design <- "
+AAAAAAAAAEEEEEE
+AAAAAAAAAEEEEEE
+BBBCCCDDDEEEEEE
+BBBCCCDDDEEEEEE
+
+"
+f5a_free <- free(f5a, side = "rlb") 
+f5b_free <- free(f5b + xlab("Metabolite-based\nVeganscreener score") + 
+                   ylab("Veganscreener score"), side = "lb") 
+f5c_free <- free(f5c + xlab("Metabolite-based\nhPDI"), side = "lb") 
+f5d_free <- free(f5d + xlab("Metabolite-based\nuPDI"), side = "lb") 
+f5e_free <- free(f5e, side = "lb") 
+
+p <- f5a_free + f5b_free + f5c_free + f5d_free + f5e_free +
+  plot_layout(design  = design,
+              widths  = c(rep(1,15)),  # length 6, one per column
+              heights = c(1,1,1,1)) +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag    = element_text(face = "bold", size = 20))
+
+p
+```
+
+```{r}
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_5.png", height=7,width=14)
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_5.pdf", height=7,width=14)
+```
+
+# Supplementary figures
+
+## FS1
+
+```{r,fig.height=15,fig.width=5}
+load("../results/vegan/figures/FS1.RData")
+p_forest
+```
+
+## FS2
+
+```{r,fig.height=15,fig.width=5}
+load("../results/vegan/figures/FS2.RData")
+p_forest
+```
+
+## FS3
+
+```{r,fig.height=15,fig.width=5}
+load("../results/vegan/figures/FS3.RData")
+p_forest <- fix_labels(p_forest)
+
+p_forest
+```
+
+```{r}
+load("../results/vegan/figures/FS_VMI_plus.RData")
+fsa <- f
+load("../results/vegan/figures/FS_VMI_minus.RData")
+fsb <- f
+load("../results/vegan/figures/FS_UPF.RData")
+fsc <- f
+```
+
+```{r,fig.width=10,fig.height=4}
+p <- (fsa + xlab("Metabolite-based\nVeganscreener score (+)") + ylab("Veganscreener score (+) (z-scored)") |     fsb + xlab("Metabolite-based\nVeganscreener score (-)") + ylab("Veganscerener score (-) (z-scored)") | fsc) + 
+  plot_layout(widths = c(1, 1,1)) & 
+  plot_annotation(tag_levels = 'A') &
+  theme(plot.tag = element_text(size = 20, face = 'bold')) 
+
+p
+```
+```{r}
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_S4.png", height=4,width=10)
+ggsave(plot=p,
+       filename = "../results/vegan/figures/Figure_S4.pdf", height=4,width=10)
+```

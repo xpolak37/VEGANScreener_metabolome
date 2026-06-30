@@ -1,0 +1,1144 @@
+---
+title: "VEGANScreener + metabolomics"
+subtitle: "Q3: Associations between uPDI and the metabolome in vegans."
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+**This code is used to explore patterns in the metabolome profiles of vegans, particularly by linking them to the PDI score**
+
+
+The script is divided into two parts, according to the integration method of metabolome datasets (see preprocessing scripts for details). At first, the **sPCA dataset** is analyzed. This dataset is used for multivariate analysis, PCA visualization, PERMANOVA and ML approach. The **concatenated dataset** of both LCMS and NMR is used for univariate analysis. 
+
+The main parts of the analysis is composed of:
+
+1.  Global visualization - 3 components color-coding **uPDI**
+
+2.  PERMANOVA - how much of the variation can be explained by various external variables:
+  dist(Metabolome) \~ sex + bmi + age + veganDuration + country***uPDI**
+
+3.  Univariate analysis (feature-wise model) - linear modelling of metabolite using various external variables:
+  Metabolite \~  sex + bmi + age + veganDuration + Country***uPDI**
+  
+4.  Random fores (RF) classification - the model is trained and validated through bootstrapping with 500 iterations. The RF model is used to distinguish between participants with **1st and 3rd tercile of uPDI**. The two types of models are trained:
+a) ML model on original sPCA dataset
+b) ML model on sPCA dataset after regressing out the covariates.
+
+```{r,echo=FALSE}
+source("custom_functions_vegans.R")
+```
+
+# Import
+
+```{r}
+metadata_df <- read.table(
+  file =  "../../data/preprocessed/metadata_preprocessed_v3.tsv",
+  header = TRUE) 
+
+lcms_df <- read.table(
+  file= "../../data/preprocessed/metabolomics/lc_ms_preprocessed_INT_v3.tsv",
+  check.names = FALSE)
+
+nmr_df <- read.table(
+  file = "../../data/preprocessed/metabolomics/nmr_preprocessed_INT_v3.tsv",
+  check.names = FALSE) 
+
+spca_integrated_df <-  read.table(
+  file = "../../data/preprocessed/metabolomics/spca_integrated_vegans_INT_v3.tsv",
+  check.names = FALSE) 
+
+pdi_df <- read.table(
+  file = "../../data/preprocessed/dietary/pdi/pdi_avg_residuals_scaled_v3.tsv",
+  check.names = FALSE,
+  header = TRUE) %>% 
+  dplyr::select(study_id,pdi_an_avg,hpdi_an_avg,updi_an_avg) 
+
+metadata_df <- merge(metadata_df,pdi_df,by = "study_id",all.x = TRUE)
+```
+
+```{r}
+metadata_df <- metadata_df %>% dplyr::filter(!is.na(updi_an_avg))
+nmr_df <- nmr_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
+lcms_df <- lcms_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
+spca_integrated_df <- spca_integrated_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
+```
+
+**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
+
+```{r}
+metadata_scaled_df <- metadata_df
+metadata_scaled_df[,-c(1,3,5,6,8)] <- apply(metadata_df[,-c(1,3,5,6,8)],2,scale)
+metadata_scaled_df <- metadata_scaled_df %>%
+  mutate(sex=as.factor(sex),
+         country=as.factor(country),
+         group=as.factor(group),
+         diet_supplements=as.factor(diet_supplements))
+```
+
+# Descriptive statistics
+
+Summary of counts per diet group, country and sex:
+
+```{r}
+metadata_df %>% dplyr::group_by(country,sex) %>% count()
+```
+
+Basic plots for visualizing the distribution of selected variables:
+
+```{r,fig.width=15,fig.height=10,warning=FALSE}
+plot_list <- list()
+name <- c("Age (years)","BMI","Vegan diet duration (years)","VS_total","UPF [%]",
+          "uPDI")
+i <- 1
+for (col in c("age","bmi","vegan_duration","VS_total","UPF_perc_avg",
+              "updi_an_avg")){
+  p <- ggplot(metadata_df) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(metadata_df[,col],na.rm = TRUE),2),"+-", round(sd(metadata_df[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+i <- 1
+name <- c("Sex","Country","Supplementation")
+for (col in c("sex","country","diet_supplements")){
+  p <- ggplot(metadata_df) +
+        theme_minimal() + 
+     theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          axis.text.x=element_text(angle = 45,hjust = 1)) +
+    stat_count(aes(x=!!sym(col)),fill="darkblue") + 
+    xlab(name[i]) +
+  geom_text(data=metadata_df %>% 
+              dplyr::group_by(!!sym(col)) %>% count() %>%
+              dplyr::mutate(n=n+10), aes(x=!!sym(col),y=n,label=n))
+  
+  plot_list[[length(plot_list)+1]] <- p
+                 
+  i <- i+1                           
+}
+
+wrap_plots(plot_list)
+
+```
+
+# SPCA
+
+The SPCA dataset was created by concatenating LCMS and NMR dataset and applying Mixomics::spca() function. See preprocessing script for details. 
+
+mixOmics::spca() performs **Sparse Principal Component Analysis**, which is similar to  regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
+This sparsity is controlled by penalization, making interpretation easier because irrelevant or noisy variables get loadings of zero.
+
+## Visualization
+
+### PCA
+
+```{r,fig.width=4,fig.height=3}
+spca_plot_df <- merge(
+  spca_integrated_df %>% rownames_to_column("study_id"),
+  metadata_df,by="study_id")
+
+p <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = "updi_an_avg",
+              perform_pca = FALSE)
+
+p <- ggtheme(p)
+
+p
+
+p_pca <- list()
+p_pca[[1]] <- p
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/PCA.pdf",height = 4,width = 6)
+p
+dev.off()
+```
+
+```{r,fig.width=15,fig.height=4}
+spca_plot_df <- merge(
+  spca_integrated_df %>% rownames_to_column("study_id"),
+  metadata_df,by="study_id")
+
+p1 <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = "updi_an_avg",
+              perform_pca = FALSE,axis = c("PC1","PC2"))
+
+p1 <- ggtheme(p1)
+
+p2 <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = "updi_an_avg",
+              perform_pca = FALSE,axis = c("PC2","PC3"))
+
+p2 <- ggtheme(p2)
+
+p3 <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = "updi_an_avg",
+              perform_pca = FALSE,axis = c("PC1","PC3"))
+
+p3 <- ggtheme(p3)
+
+p1 + p2 + p3 + 
+plot_layout(guides = "collect")
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/PCA_all.pdf",height = 4,width = 15)
+p1 + p2 + p3 + 
+plot_layout(guides = "collect")
+dev.off()
+```
+
+
+
+### Boxplots
+
+```{r,fig.height=15,fig.width=20}
+spca_for_uni <- merge(spca_integrated_df %>% rownames_to_column("study_id"),
+                      metadata_scaled_df,by="study_id",all = TRUE) 
+
+spca_for_uni <- spca_for_uni %>%
+  mutate(
+    tertile_cut = ntile(updi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_label = case_when(                          # label tertiles
+      tertile_cut == 1 ~ "1st_uPDItertile",
+      tertile_cut == 2 ~ "2nd_uPDItertile",
+      tertile_cut == 3 ~ "3rd_uPDItertile"
+    )
+  )
+
+plot_list <- list()
+for (col in colnames(spca_integrated_df)){
+  p <- ggplot(spca_for_uni, 
+              aes_string(x = "tertile_label",y = col,fill="tertile_label")) +
+    geom_boxplot() +
+    ggtitle(col) + 
+    theme_minimal() + 
+    scale_fill_manual(values = c("#1A9850","orange","#D73027")) +
+    geom_signif(comparisons = 
+                  combn(as.character(unique(spca_for_uni$tertile_label)),
+                        m=2, simplify = FALSE),
+                map_signif_level = TRUE, step_increase = 0.1,textsize = 2)
+  
+  p <- ggtheme(p)
+  plot_list[[length(plot_list) + 1]] <- p
+}
+
+
+a <- wrap_plots(plot_list,guides = "collect")
+
+a
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/pca_boxplots.pdf",height = 15,width = 20)
+a
+dev.off()
+```
+
+
+### Heatmap
+
+```{r}
+metadata_df <- metadata_df %>%
+  mutate(
+    tertile_cut = ntile(updi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_label = case_when(                          # label tertiles
+      tertile_cut == 1 ~ "1st_uPDItertile",
+      tertile_cut == 2 ~ "2nd_uPDItertile",
+      tertile_cut == 3 ~ "3rd_uPDItertile"
+    )
+  ) %>%
+  dplyr::select(-tertile_cut)
+```
+
+```{r}
+PDI_colors <- c("1st_uPDItertile"="#1A9850",
+               "2nd_uPDItertile"="orange",
+               "3rd_uPDItertile"="#D73027")
+
+p_df <- spca_integrated_df %>% t()
+
+ann_df <- metadata_df %>% dplyr::select(study_id,tertile_label) %>%
+  column_to_rownames("study_id")
+
+ann_colors <- list(
+  "tertile_label"=PDI_colors
+)
+names(ann_colors[["tertile_label"]]) <- names(PDI_colors)
+
+p <- pheatmap(p_df,cluster_rows = FALSE,show_colnames = FALSE,
+              annotation_col = ann_df,
+              annotation_colors = ann_colors,silent = TRUE)
+
+p
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/pca_heatmap.pdf",height = 10,width = 10)
+p
+dev.off()
+```
+
+**Tertile averages**
+
+```{r}
+metadata_df %>%
+  dplyr::select(updi_an_avg, tertile_label) %>%
+  group_by(tertile_label) %>%
+  summarise(mean_uPDI = mean(updi_an_avg, na.rm = TRUE))
+```
+
+## PERMANOVA
+
+The test show how much of the variation in metabolomics is explained by: sex - age - bmi -vegan duration - Country - **uPDI**
+
+Variables were added sequentially (Type I SS), so each p-value and R² reflects a partial effect, after adjusting for those above. This model accounts for variation due to sex, age, vegan diet duration, BMI and country of origin. Then accounts for the main effects of PDI. Then tests whether the effect of PDI varies by country of origin (interaction).
+
+----------------------
+
+PDI explains **1.873** of variation after adjusting for sex, age, bmi,country and duration of the diet. This result is statistically *significant* (p=0.001).
+
+```{r}
+# Create Euclidean distance matrix
+dist_mat <- vegdist(spca_integrated_df, 
+                    method = "euclidean")
+
+# Test whether vegan vs omnivore differ in metabolomics
+adonis_result <- adonis2(
+  dist_mat ~ sex + bmi + age + vegan_duration + country*updi_an_avg,
+  data = metadata_scaled_df , 
+  permutations = 999,
+  by="terms")
+
+print(adonis_result)
+```
+
+```{r,fig.width=6,fig.height=2}
+adonis_result <- adonis_result[-c(7,9),] %>% rownames_to_column("Var")
+adonis_result$Var <- factor(adonis_result$Var,levels = rev(c("sex","bmi","age", "vegan_duration","country","updi_an_avg", "Residual")))
+p <- ggplot(adonis_result, aes(fill=Var, x=R2, y="Metabolome")) + 
+    geom_bar(position="stack", stat="identity") + 
+  ylab("") + xlab("Partial variance explained (R²)") + 
+  scale_fill_manual(values=rev(c("#ffffcc","#b3cde3","#ccebc5",
+                                 "#decbe4","#fed9a6","darkred",
+                                 "lightgrey")),name = "Covariate")  
+
+p <- ggtheme(p)
+
+p
+
+p_pca[[2]] <- p
+p_pca[[3]] <- adonis_result
+```
+
+## RF model
+
+### Original model
+
+```{r}
+sub_metadata_df <- metadata_df %>%
+dplyr::filter(
+  tertile_label %in% c("1st_uPDItertile","3rd_uPDItertile"))
+
+sub_spca_integrated_df <- spca_integrated_df[as.character(sub_metadata_df$study_id),]
+```
+
+```{r,fig.height=5,fig.width=5}
+model_name <- "uPDI_tertile_vegan" 
+
+prepared_df <- model_preparation(sub_spca_integrated_df,
+                                 sub_metadata_df,
+                                 predicting_col = "tertile_label")
+
+rf_model <- make_rf_model(data=prepared_df,
+                            outcome="Group",
+                            N = 10,
+                           file = model_name,
+                              reuse=TRUE)
+
+roc_c <- roc_curve(model_object = rf_model, 
+                   group = c("low uPDI","high uPDI"),CI = TRUE) 
+
+roc_c <- ggtheme(roc_c) + 
+  theme(legend.position="none",title = element_text(size=8))
+
+roc_c
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/orig_rf_pdi.pdf",width = 6,height = 5)
+roc_c
+dev.off()
+```
+
+**Accuracy**
+
+```{r}
+# Find the "best" threshold using Youden's J Index
+# This maximizes (Sensitivity + Specificity - 1)
+roc_obj <- rf_model$rocobj
+best_threshold_data <- coords(roc_obj, "best", 
+                              ret = "threshold", 
+                              best.method = "youden")
+optimal_threshold <- best_threshold_data$threshold
+optimal_threshold
+```
+
+```{r}
+# saving the results
+save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_model)
+```
+
+### Adjusted model
+
+```{r,fig.height=5,fig.width=5}
+# Covariates to adjust for
+covars <- c("sex","bmi", "age", "country", "vegan_duration")
+integrated_df <- sub_spca_integrated_df
+all(rownames(integrated_df) == sub_metadata_df$study_id)
+adjusted_data <- adjust_for_covars(integrated_df, covars, sub_metadata_df)
+
+model_name <- "adjusted_uPDI_model_vegan" 
+
+prepared_df <- model_preparation(adjusted_data,
+                                 sub_metadata_df,
+                                 predicting_col = "tertile_label")
+
+rf_model <- make_rf_model(data=prepared_df,
+                          outcome="Group",
+                          N = 500,
+                          file = model_name,
+                          reuse=TRUE)
+
+roc_c <- roc_curve(model_object = rf_model, 
+                   group = c("low uPDI","high uPDI"),CI = TRUE) 
+
+roc_c <- ggtheme(roc_c) + 
+  theme(legend.position="none",title = element_text(size=8))
+
+roc_c
+
+
+```
+
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/adjusted_rf_PDI.pdf",width = 6,height = 5)
+roc_c
+dev.off()
+```
+
+```{r}
+# Find the "best" threshold using Youden's J Index
+# This maximizes (Sensitivity + Specificity - 1)
+roc_obj <- rf_model$rocobj
+best_threshold_data <- coords(roc_obj, "best", 
+                              ret = "threshold", 
+                              best.method = "youden")
+optimal_threshold <- best_threshold_data$threshold
+optimal_threshold
+```
+
+```{r}
+# saving the results
+save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_model)
+```
+
+## RF importance
+
+### Original model
+
+**PC5** is **PC10** the most important for RF model.
+
+```{r,fig.width=10}
+load("../intermediate_files/models/uPDI_tertile_vegan/rf_model.RData")
+
+var_imp <- as.data.frame(importance(rf_model$trained_model)) %>%
+  rownames_to_column("PC") %>%
+  `colnames<-`(c("PC","Importance")) 
+
+var_imp <- var_imp %>% dplyr::mutate(PC=factor(PC,levels = PC[order(var_imp$Importance,decreasing = TRUE)])) 
+
+ggplot(var_imp) + 
+  geom_col(aes(x=PC,y=Importance))
+```
+
+### Adjusted model
+
+The most important is **PC5** and **PC1**.
+
+```{r,fig.width=10}
+load("../intermediate_files/models/adjusted_uPDI_model_vegan/rf_model.RData")
+
+var_imp <- as.data.frame(importance(rf_model$trained_model)) %>%
+  rownames_to_column("PC") %>%
+  `colnames<-`(c("PC","Importance")) 
+
+var_imp <- var_imp %>% dplyr::mutate(PC=factor(PC,levels = PC[order(var_imp$Importance,decreasing = TRUE)])) 
+
+ggplot(var_imp) + 
+  geom_col(aes(x=PC,y=Importance))
+```
+
+### Visualization
+
+To explore the important PCs, their visualization is shown below. We will show **PC1** and **PC5** as these PCs were picked by original or adjusted models. However, as the performance of the  model was poor, the visualization is rather reduntant. 
+
+
+```{r,fig.width=8,fig.height=6}
+spca_plot_df <- merge(
+  spca_integrated_df %>% rownames_to_column("study_id"),
+  metadata_df,by="study_id")
+
+p <- pca_plot(spca_integrated_df,
+              metadata_df,
+              color_col = "updi_an_avg",
+              perform_pca = FALSE,
+              axis = c("PC1","PC5"))
+
+p <- ggtheme(p)
+
+p
+
+p_pca[[4]] <- p
+```
+
+
+# Concatenated dataset
+
+```{r}
+concat_integrated_df <- cbind(lcms_df,nmr_df)
+```
+
+## Visualization
+
+### Boxplots
+
+```{r,fig.height=40,fig.width=20}
+concat_for_uni <- merge(concat_integrated_df %>% rownames_to_column("study_id"),
+                      metadata_scaled_df,by="study_id",all = TRUE) 
+
+concat_for_uni <- concat_for_uni %>%
+  mutate(
+    tertile_cut = ntile(updi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_label = case_when(                          # label tertiles
+      tertile_cut == 1 ~ "1st_uPDItertile",
+      tertile_cut == 2 ~ "2nd_uPDItertile",
+      tertile_cut == 3 ~ "3rd_uPDItertile"
+    )
+  )
+
+plot_list <- list()
+for (col in colnames(concat_integrated_df)){
+  p <- ggplot(concat_for_uni, 
+              aes(x = tertile_label,
+                  y = !!sym(col),
+                  fill=tertile_label)) +
+    geom_boxplot() +
+    ggtitle(col) + 
+    theme_minimal() + 
+    scale_fill_manual(values = c("#1A9850","orange","#D73027")) +
+    geom_signif(comparisons = 
+                  combn(as.character(unique(concat_for_uni$tertile_label)),
+                        m=2, simplify = FALSE),
+                map_signif_level = TRUE, step_increase = 0.1,textsize = 2)
+  
+  p <- ggtheme(p) + 
+    theme(axis.text.x = element_text(angle=45,hjust = 1))
+  plot_list[[length(plot_list) + 1]] <- p
+}
+
+
+a <- wrap_plots(plot_list,guides = "collect")
+
+a
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/concat_boxplots.pdf",height = 35,width = 20)
+a
+dev.off()
+```
+
+### Heatmap
+
+```{r}
+VS_colors <- c("1st_uPDItertile"="#1A9850",
+               "2nd_uPDItertile"="orange",
+               "3rd_uPDItertile"="#D73027")
+
+metadata_df <- metadata_df %>%
+  mutate(
+    tertile_cut = ntile(updi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_label = case_when(                          # label tertiles
+      tertile_cut == 1 ~ "1st_uPDItertile",
+      tertile_cut == 2 ~ "2nd_uPDItertile",
+      tertile_cut == 3 ~ "3rd_uPDItertile"
+    )
+  ) %>%
+  dplyr::select(-tertile_cut)
+
+p_df <- concat_integrated_df %>% t()
+
+ann_df <- metadata_df %>% dplyr::select(study_id,tertile_label) %>%
+  column_to_rownames("study_id")
+
+ann_colors <- list(
+  "tertile_label"=VS_colors
+)
+names(ann_colors[["tertile_label"]]) <- names(VS_colors)
+
+p <- pheatmap(p_df,cluster_rows = FALSE,show_colnames = FALSE,
+              show_rownames = FALSE,
+              annotation_col = ann_df,
+              annotation_colors = ann_colors,silent = TRUE)
+
+p
+```
+
+```{r,eval=TRUE,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/concat_heatmap.pdf",height = 10,width = 10)
+p
+dev.off()
+```
+
+
+## Univariate analysis
+
+We will test the differences between diets and VS total using generalize linear model while adjusting for covariates.
+
+### Continuous analysis
+
+Call glm to explore which metabolites are significantly related to VS score while adjusting for age, sex, Country and dietary group:
+
+Metabolite ~ sex + bmi + age + eq_vegan_dur_total + Country*uPDI
+
+```{r}
+results_list <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_glm(x,concat_for_uni,
+                                           tested_variable = "updi_an_avg"))
+results_df <- do.call(rbind, results_list)
+
+results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
+```
+
+Look at significant results - **13 metabolites**
+
+```{r}
+results_df %>%
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(variable=="updi_an_avg")
+
+```
+
+```{r}
+results_all <- (results_df %>%
+  dplyr::filter(variable=="updi_an_avg"))
+
+# save 
+write.table(results_all,"../results/vegan/Q3_uPDI//lm_continous_all.tsv",
+            row.names = FALSE,
+            quote=FALSE,
+            sep="\t")
+```
+
+Check the interaction effect - **SM.d34.1., Phenylbutyrylglutamine, Tyrosine**
+
+```{r}
+df <- results_df %>%
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(str_ends(variable, ":updi_an_avg"))
+
+df
+
+pc_to_be_removed <- df$metabolite
+```
+
+```{r,collapse=TRUE}
+concat_significant_df <- (results_df %>%
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(variable=="updi_an_avg"))
+
+concat_univariate_results <- results_df
+
+concat_significant <- (results_df %>%
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(variable=="updi_an_avg"))$metabolite
+
+# save and show
+write.table(concat_significant_df,"../results/vegan/Q3_uPDI//lm_continous.tsv",
+            row.names = FALSE,
+            quote=FALSE,
+            sep="\t")
+
+knitr::kable(concat_significant)
+```
+
+**Volcano plot**
+
+```{r}
+vp <- volcano_plot(results_df,comparison = "updi_an_avg")
+vp
+```
+
+**Correlation**
+
+```{r}
+sign <- (results_df %>%
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(variable=="updi_an_avg"))$metabolite
+
+```
+
+```{r,fig.height=5,fig.width=5}
+df_for_plot <- concat_integrated_df %>% dplyr::select(sign)
+corr_object <- cor(concat_for_uni$updi_an_avg,df_for_plot)
+corrplot::corrplot(corr_object,method = "number")
+```
+
+**Vegan duration**
+
+```{r}
+results_df %>%
+  dplyr::filter(p_adjusted<0.05) %>%
+  dplyr::filter(variable=="vegan_duration")
+
+```
+
+### Pairwise analysis
+
+Metab ~ sex + bmi + age + eq_vegan_dur_total + Country + tertile_label
+ 
+**LM**
+
+```{r}
+results_list <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_netglm(x,concat_for_uni,
+                                           tested_variable = "tertile_label"))
+results_df <- do.call(rbind, results_list)
+
+pdi_effects <- results_df %>%
+  dplyr::mutate(p_adj = p.adjust(`p.value`, method = "BH"))
+
+concat_significant_cat <-  pdi_effects %>%
+  filter(p_adj < 0.05)
+```
+
+
+```{r}
+results_list_pairwise <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_netglm_pairwise(x,concat_for_uni,
+                                           tested_variable = "tertile_label"))
+results_df_pairwise <- do.call(rbind, results_list_pairwise)
+
+pdi_effects_pairwise <- results_df_pairwise %>%
+  dplyr::mutate(p_adj = p.adjust(`p.value`, method = "BH"))
+
+pdi_significant_pairwise <-  pdi_effects_pairwise %>%
+  filter(p_adj < 0.05)
+```
+
+#### Heatmap
+
+```{r}
+df2 <- pdi_effects_pairwise %>%
+  mutate(
+    contrast = gsub("_uPDItertile", "", contrast),  
+    signif = p_adj < 0.05
+  )
+
+df2$Significance <- ifelse(df2$p_adj<0.001,"***",
+                                       ifelse(df2$p_adj<0.01,"**",
+                                              ifelse(df2$p_adj<0.05,"*","")))
+
+```
+
+```{r,fig.height=8,fig.width=5}
+p_pairwise_heatmap <- ggplot(df2, aes(x = contrast, y = Metabolite, fill = estimate)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Significance,vjust=0.6), color = "black", size = 2) +
+  scale_fill_gradient2(
+    low = "darkcyan", mid = "white", high = "brown", midpoint = 0) + 
+  theme_minimal() +
+  theme(axis.text.y = element_text(size=4),
+        axis.text.x = element_text(angle = 45,face="bold",hjust = 1),
+        panel.grid = element_blank()) + 
+  xlab("") + ylab("")
+
+p_pairwise_heatmap
+```
+
+
+#### Network construction
+
+**Edge list**
+
+```{r}
+edges <- pdi_effects %>%
+  filter(p_adj < 0.05) %>%
+  #filter(abs(emmean)>0.3) %>%
+  dplyr::select(from = tertile_label, to = metabolite, 
+         emmean = emmean) %>%
+  dplyr::mutate(from=as.character(from),
+         weight=abs(emmean))
+
+edges$from <- as.character(edges$from)
+edges$to   <- as.character(edges$to)
+```
+
+**Nodes table**
+
+```{r}
+tertiles <- as.character(unique(edges$from))
+metabs <- as.character(unique(edges$to))
+
+nodes <- data.frame(
+  name = c(tertiles, metabs),
+  type = c(rep(TRUE, length(tertiles)), rep(FALSE, length(metabs))) # TRUE = tertile, FALSE = metabolite
+)
+```
+
+**Build igraph object**
+
+```{r}
+g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+```
+
+**Visualize**
+
+```{r,fig.height=6,fig.width=6}
+VS_colors <- c("1st_uPDItertile"="#D73027",
+               "2nd_uPDItertile"="orange",
+               "3rd_uPDItertile"="#1A9850")
+
+# Assign colors to nodes: countries get their color, metabolites gray
+V(g)$color <- ifelse(V(g)$type,
+                     VS_colors[V(g)$name],
+                     "gray70")
+
+set.seed(123)
+ggraph(g, layout = "fr") +
+  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
+  scale_edge_color_manual(values = c("lightblue", "lightpink"), labels = c("<0", ">0")) +
+  geom_node_point(aes(shape=type,color = name), size = 6) +
+  scale_color_manual(values = setNames(V(g)$color, V(g)$name)) +  # node colors
+  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
+  theme_void() +
+  guides(color = "none")
+
+```
+
+#### Top-group assignment
+
+**All together**
+
+```{r}
+PDI_colors <- c("1st_uPDItertile"="#1A9850",
+               "2nd_uPDItertile"="orange",
+               "3rd_uPDItertile"="#D73027",
+               "other"="gray70")
+
+# Assign colors to nodes: countries get their color, metabolites gray
+V(g)$color <- ifelse(V(g)$type,
+                     PDI_colors[V(g)$name],
+                     "gray70")
+
+top_group <- edges %>%
+  dplyr::group_by(to) %>%
+  slice_max(order_by = abs(weight), n = 1, with_ties = FALSE) %>%
+  dplyr::select(from,to, weight) %>%
+  ungroup()
+
+top_group
+
+top_group_viz <- rbind(top_group, 
+                       data.frame(
+                         from=unique(edges$from),
+                         to=unique(edges$from),
+                         weight=NA))
+
+membership_df <- data.frame(
+  vertex = top_group_viz$to,
+  cluster = top_group_viz$from) 
+
+membership_df <- membership_df %>% arrange(match(vertex,names(V(g))))
+
+```
+
+```{r}
+pdi_clusters <- (membership_df %>%
+  group_by(cluster) %>%
+  summarise(metabolites = paste(unique(vertex), collapse = ", ")))[1:3,]
+
+(membership_df %>%
+  group_by(cluster) %>%
+  summarise(Number_of_metabolites = length(unique(vertex))-1))[1:3,]
+
+pdi_clusters
+```
+
+```{r}
+V(g)$fill <- VS_colors[membership_df$cluster]
+V(g)$color <- VS_colors[membership_df$cluster]
+```
+
+```{r,fig.height=6,fig.width=6}
+set.seed(123)
+p_all <- ggraph(g, layout = "fr") +
+  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
+  scale_edge_color_manual(values = c("lightblue","lightpink"),labels = c("<0", ">0")) +
+  geom_node_point(aes(size=type,color = name,fill=name),shape=21,stroke=1.2) +
+  scale_color_manual(values = setNames(V(g)$color, V(g)$name))   + # node colors
+  scale_fill_manual(values = setNames(V(g)$fill, V(g)$name)) +  # node fill
+  geom_node_text(aes(label = name), repel = TRUE, size = 3) +
+  theme_void() + 
+  theme(legend.position = "none")
+
+
+p_all
+```
+
+```{r,fig.height=10,fig.width=15}
+
+list_core <- list()
+
+list_core[["concat_univariate"]] <- unique(concat_significant)
+
+```
+
+# Final significant metabolites
+
+::: {.output-background style="background-color: lightgreen; padding: 10px;"}
+
+
+```{r,echo=TRUE}
+final_significance <- list_core[["concat_univariate"]]
+final_significance
+```
+
+:::
+
+# Metabolite-based uPDI
+
+## Continuous univariate test
+
+To create a vegan index based on concatenated dataset, we will use linear regression in order to get coefficients on significant variables that were revealed across the analysis:
+
+```{r}
+sign <- final_significance
+sign
+```
+
+
+```{r}
+# define the variables
+plot_list <- list()
+rhos <- rep(NA,5)
+
+# split the datasets for cross-validation
+concat_for_index <- concat_for_uni[sample(rownames(concat_for_uni)),]
+cv_splits <- cv_folds(concat_for_index,folds = 5)
+
+# define formula - significant metabolites
+vars <- sign
+# Wrap all variable names in backticks
+vars_safe <- paste0("`", vars, "`")
+
+# Create the formula
+fml <- as.formula(paste("updi_an_avg ~", paste(vars_safe, collapse = " + ")))
+
+final_df_veganindex <- data.frame()
+
+# cross validation loop
+for (i in 1:length(cv_splits)){
+  # fit the model
+  model <- lm(fml, data = concat_for_uni[cv_splits[[i]]$train,])
+  # predict the result on validation dataset
+  VG_index <- stats::predict(model,concat_for_uni[cv_splits[[i]]$val,])
+  
+  # store the predicted index
+  sub_df <- concat_for_uni[cv_splits[[i]]$val,]
+  sub_df$VGindex <- VG_index
+  final_df_veganindex <- rbind(final_df_veganindex,sub_df)
+  
+  # calculate correlation 
+  cor_test <- cor.test(sub_df$VGindex,
+               sub_df$updi_an_avg,
+               method = "spearman")
+  cor_val <- cor_test$estimate
+  if (cor_test$p.value >0.05) cor_val = 0
+
+  # plot the result
+  p <- ggplot(sub_df, 
+              aes_string(x = "VGindex", y = "updi_an_avg"),
+              color="blue") +
+       geom_point() + 
+    geom_smooth(method = "lm") + 
+    theme_minimal() + 
+    ggtitle(paste("Rho =",round(cor_val,2)))
+
+  plot_list[[i]] <- p
+  rhos[i] <- round(cor_val,2)
+  
+}
+
+```
+
+```{r}
+mean(rhos)
+```
+
+```{r}
+# calculate correlation 
+  cor_test <- cor.test(final_df_veganindex$VGindex,
+               final_df_veganindex$updi_an_avg,
+               method = "spearman")
+  cor_val <- cor_test$estimate
+  if (cor_test$p.value >0.05) cor_val = 0
+
+  # plot the result
+  p <- ggplot(final_df_veganindex, 
+              aes_string(x = "VGindex", y = "updi_an_avg"),
+              color="blue") +
+       geom_point() + 
+    geom_smooth(method = "lm") + 
+    theme_minimal() + 
+      theme(panel.border = 
+              element_rect(color = "black", fill = NA, size = 0),
+            panel.grid = element_blank(),
+            axis.ticks.x = 
+              element_line(size=0.3,color = "black"),
+            axis.ticks.y = 
+              element_line(size=0.3,color="black"),
+            axis.ticks.length = unit(4,"pt"),
+            axis.text=element_text(face="bold",size=12),
+            axis.title = element_text(face="bold",size=15)) + 
+    ggtitle(paste("Rho =",round(cor_val,2))) + 
+    xlab("Metabolite-based uPDI") + 
+    ylab("uPDI (z-scored)") 
+  
+p 
+```
+
+```{r}
+f <- p + ggtitle("")
+save(f,file="../results/vegan/figures/F5d_uPMI.RData")
+```
+
+# Plot for publication
+
+## Heatmap
+
+```{r,fig.height=8,fig.width=5}
+p_pairwise_heatmap
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI//final_significance_pairwise.pdf",height = 8,width = 5)
+p_pairwise_heatmap
+dev.off()
+```
+
+## Forest plot
+
+```{r, fig.height=15,fig.width=5}
+# Define custom colours
+PDI_colors <- c("1st_uPDItertile"="#1A9850",
+               "2nd_uPDItertile"="orange",
+               "3rd_uPDItertile"="#D73027")
+
+# Optional: order metabolites by mean effect size
+forest_df <- pdi_effects %>%
+  group_by(metabolite) %>%
+  mutate(mean_eff = mean(emmean)) %>%
+  ungroup()
+
+forest_df$metabolite <- factor(
+  forest_df$metabolite,
+  levels = forest_df %>% 
+    arrange(mean_eff) %>% 
+    pull(metabolite) %>% 
+    unique()
+)
+
+# Forest plot WITHOUT ANY TEXT LABELS
+p_forest <- ggplot(forest_df, 
+                   aes(x = emmean, 
+                       y = metabolite, 
+                       color = tertile_label)) +
+
+  geom_point(size = 2.5) +
+  geom_errorbarh(aes(xmin = lower.CL, xmax = upper.CL), height = 0.2) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+
+  scale_color_manual(values = VS_colors) +
+
+  theme_minimal() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_text(size = 6),
+        panel.grid.minor = element_blank()) +
+
+  labs(
+    x = "Estimated mean (with 95% CI)",
+    color = "uPDI"
+  )
+
+p_forest
+
+```
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/final_significance_forest.pdf",height = 15,width = 6)
+p_forest
+dev.off()
+```
+
+## Network
+
+```{r,fig.width=6,fig.height=6}
+p_all
+```
+
+
+```{r,echo=FALSE}
+pdf("../results/vegan/Q3_uPDI/final_significance_networks.pdf",height = 6,width = 11)
+p_all
+dev.off()
+
+```

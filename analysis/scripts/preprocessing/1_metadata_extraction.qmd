@@ -1,0 +1,98 @@
+---
+title: "VEGANScreener + metabolomics"
+subtitle: "Preprocessing part 1: Metadata extraction"
+author: "Petra Polakovicova"
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    df-print: paged
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+```{r}
+full_dataset <- as.data.frame(
+  fread("../../../data/raw/Fulldata_tns_totals_16dec2025_part1.csv"))
+```
+
+**Validating VS_total and calculating VS+ and VS-**
+
+```{r}
+vs_scoring <- read.xlsx("../../../data/raw/veganscreener/VG_scoring.xlsx")
+vs_total_variables <- vs_scoring$total_variable
+
+all(rowSums(full_dataset[,vs_total_variables]) == full_dataset$VS_total,na.rm = TRUE)
+```
+
+```{r}
+vs_total_plus_variables <- vs_scoring$total_variable[vs_scoring$plus_minus=="plus"]
+vs_total_minus_variables <- vs_scoring$total_variable[vs_scoring$plus_minus=="minus"]
+
+full_dataset$VS_total_plus <- rowSums(full_dataset[,vs_total_plus_variables])
+full_dataset$VS_total_minus <- rowSums(full_dataset[,vs_total_minus_variables])
+```
+
+```{r}
+sub_dataset <- full_dataset %>% 
+  dplyr::select(study_id,age,eq_sex,eq_bmi,study_center,eq_included_group,
+                eq_vegan_dur_total,diet_supplements,VS_total,VS_total_plus,VS_total_minus,
+                perc_upf_dr1,perc_upf_dr2,perc_upf_dr3,perc_upf_dr4) %>%
+  dplyr::mutate(perc_upf_avg = rowMeans(
+      dplyr::across(starts_with("perc_upf_dr")),
+      na.rm = TRUE)) %>% 
+  dplyr::select(-(perc_upf_dr1:perc_upf_dr4))
+
+metadata_df <- sub_dataset %>%
+  mutate(
+    eq_sex = case_when(
+      eq_sex == 1 ~ "M",
+      eq_sex == 2 ~ "F",
+      eq_sex == 3 ~ "OTHER",
+      TRUE ~ as.character(eq_sex)  # keep original if none matches
+    ),
+    eq_included_group = case_when(
+      eq_included_group == 1 ~ "VG",
+      eq_included_group == 0 ~ "OM",
+      TRUE ~ as.character(eq_included_group)
+    ),
+    study_center = case_when(
+      study_center == 1 ~ "BE",
+      study_center == 2 ~ "CZ",
+      study_center == 3 ~ "DE",
+      study_center == 4 ~ "ES",
+      study_center == 5 ~ "CH",
+      TRUE ~ as.character(study_center)
+    )
+  )
+```
+
+```{r}
+colnames(metadata_df) <- c("study_id","age","sex","bmi","country","group","vegan_duration","diet_supplements","VS_total","VS_total_plus","VS_total_minus", "UPF_perc_avg")
+
+```
+
+```{r}
+write.table(metadata_df,"../../../data/raw/veganscreener/metadata_extracted_Fulldata.tsv",
+            sep="\t",row.names = FALSE,quote = FALSE)
+```

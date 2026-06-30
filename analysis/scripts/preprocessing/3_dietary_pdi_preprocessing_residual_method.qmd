@@ -1,0 +1,222 @@
+---
+title: "VEGANScreener + metabolomics"
+subtitle: "Preprocessing part 3: Dietary data"
+author: "Petra Polakovicova"
+format: 
+  html:  
+    embed-resources: true
+    keep-md: false
+    toc: true
+    toc-expand: 3
+    toc-depth: 6
+    toc-location: left
+    number-sections: true
+    number-depth: 6
+    code-fold: false
+    code-tools: true
+    code-summary: "Open code"
+    df-print: paged
+    grid: 
+      body-width: 1000px
+      sidebar-width: 600px
+      margin-width: 100px
+execute: 
+  warning: false
+  message: false
+  echo: true
+editor: source
+project:
+  type: default
+  output-dir: output
+fontsize: 12 px
+---
+
+```{r}
+library(openxlsx)
+library(data.table)
+library(DataExplorer)
+library(patchwork)
+library(tidyverse)
+```
+
+```{r}
+tns_totals_part1 <- as.data.frame(
+  fread("../../../data/raw/Fulldata_tns_totals_16dec2025_part1.csv"))  %>%
+  dplyr::select("study_id","study_id","age",
+                "gender","bmi","eq_included_group",
+                "study_center",
+                dplyr::starts_with("PDI"),
+                dplyr::starts_with("updi"),
+                dplyr::starts_with("hpdi"))
+
+tns_totals_part2 <- as.data.frame(
+  fread("../../../data/raw/Fulldata_tns_totals_16dec2025_part2.csv")) %>%
+  dplyr::select("study_id",dplyr::starts_with("TNS_Energy_kJ"))
+
+pdi_df <- merge(tns_totals_part1,tns_totals_part2,by="study_id",all=TRUE)
+colnames(pdi_df) <- gsub("_dr","_",colnames(pdi_df))
+
+```
+
+# PDI exploration
+
+## Avg PDI
+
+```{r}
+pdi_avg_df <- pdi_df
+
+# Find all columns that end with _1, _2, _3, etc.
+pattern_cols <- names(pdi_avg_df)[str_detect(names(pdi_avg_df), "_\\d+$")]
+
+# Get unique base names by removing the _number suffix
+base_names <- unique(str_remove(pattern_cols, "_\\d+$"))
+
+# Loop over each base name and calculate row-wise averages
+for (base in base_names) {
+  cols_to_avg <- grep(paste0("^", base, "_\\d+$"), names(pdi_avg_df), value = TRUE)
+  pdi_avg_df[[paste0(base, "_avg")]] <- rowMeans(pdi_avg_df[, cols_to_avg], na.rm = TRUE)
+  # remove the _1 .. _4
+  pdi_avg_df <- pdi_avg_df %>% dplyr::select(-all_of(cols_to_avg))
+}
+
+```
+
+```{r}
+apply(pdi_avg_df,2,function(x) length(unique(x)))
+```
+
+```{r}
+write.table(
+  pdi_avg_df,"../../../data/preprocessed/dietary/pdi/pdi_avg_unadjusted.tsv",
+  sep="\t",quote = FALSE,row.names = FALSE)
+```
+
+Basic plots for visualizing the distribution:
+
+```{r,fig.width=25}
+plot_list <- list()
+name <- colnames(pdi_avg_df)[c(-1)]
+i <- 1
+for (col in name){
+  p <- ggplot(pdi_avg_df) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(pdi_avg_df[,col],na.rm = TRUE),2),"+-", round(sd(pdi_avg_df[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+
+# Preprocessing
+
+**No need for imputation**
+
+```{r}
+pdi_avg_df[pdi_avg_df==""] <- NA
+
+sum(is.na(pdi_avg_df))
+
+pdi_avg_df[,-c(25:31)][is.na(pdi_avg_df[,-c(25:31)])] <- 0 
+```
+
+
+## Removing clients
+
+```{r}
+metadata_df <- read.table(
+  "../../../data/preprocessed/metadata_preprocessed_v3.tsv",header = TRUE)
+
+pdi_avg_df <- pdi_avg_df %>% dplyr::filter(study_id %in% metadata_df$study_id)
+
+```
+
+## Residual method
+
+```{r}
+pdi_avg_res_wdf <- pdi_avg_df %>% dplyr::select(TNS_Energy_kJ_avg,PDI_animal_fat_avg:PDI_whole_grains_avg)
+pdi_avg_res_df <- pdi_avg_df
+
+for (col in colnames(pdi_avg_res_wdf)[-1]){
+  fo <- as.formula(paste0(col, " ~ ","TNS_Energy_kJ_avg"))
+  model <- lm(formula = fo,data = pdi_avg_df)
+  res <- resid(model)
+  pdi_avg_res_df[names(res),col] <- res
+}
+
+write.table(pdi_avg_res_df,"../../../data/preprocessed/dietary/pdi/pdi_avg_residuals_v3.tsv",sep="\t",quote = FALSE,row.names = FALSE)
+```
+
+Basic plots for visualizing the distribution:
+
+```{r,fig.width=25}
+plot_list <- list()
+name <- colnames(pdi_avg_res_df)[c(-1)]
+i <- 1
+for (col in name){
+  p <- ggplot(pdi_avg_res_df) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(pdi_avg_res_df[,col],na.rm = TRUE),2),"+-", round(sd(pdi_avg_df[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+
+## Autoscaling
+
+```{r}
+data_scaled <- pdi_avg_res_df %>% dplyr::select(PDI_animal_fat_avg:PDI_whole_grains_avg)
+data_scaled <- scale(data_scaled, center = TRUE, scale = TRUE)
+
+pdi_avg_res_scaled_df <- pdi_avg_res_df
+pdi_avg_res_scaled_df[,colnames(data_scaled)] <- data_scaled
+
+```
+
+```{r}
+write.table(pdi_avg_res_scaled_df,
+            "../../../data/preprocessed/dietary/pdi/pdi_avg_residuals_scaled_v3.tsv",
+            sep="\t",quote = FALSE,row.names = FALSE)
+```
+
+```{r,fig.width=25}
+plot_list <- list()
+name <- colnames(pdi_avg_res_scaled_df)[c(-1)]
+i <- 1
+for (col in name){
+  p <- ggplot(pdi_avg_res_scaled_df) + 
+    geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
+    theme_minimal() + 
+    theme(axis.title = element_text(face="bold",size=20),
+          axis.text=element_text(face="bold",size=20),
+          title = element_text(face = "plain",size=20)) + 
+    xlab(name[i]) +
+    ggtitle(paste(round(mean(pdi_avg_res_scaled_df[,col],na.rm = TRUE),2),"+-", round(sd(pdi_avg_res_scaled_df[,col],na.rm = TRUE),2)))
+  
+  plot_list[[length(plot_list)+1]] <- p
+  i <- i + 1 
+                                            
+}
+
+wrap_plots(plot_list)
+
+```
+

@@ -1,12 +1,38 @@
 # VEGANScreener: metabolomics evaluation
 
 <div style="font-size: larger;">
-Petra Polakovicova,  Anna Ouradova, Helena Pelantova,  ...., Selma Kronsteiner-Gicevic, Jan Gojda, Marek Kuzma, Monika Cahova
+Petra Polakovicova<sup>1,2,3†</sup>, Anna Ouradova<sup>4†</sup>, Doris Janousova<sup>3,5</sup>, Dominika Sindelarova<sup>3,6</sup>,
+Helena Pelantova<sup>3</sup>, Selma Kronsteiner-Gicevic<sup>7</sup>, Jan Gojda<sup>4†</sup>, Marek Kuzma<sup>3†</sup>, Markus Keller<sup>8†</sup>,
+Leonie H. Bog<sup>l9†</sup>, Isabelle Herter-Aeberli<sup>10†</sup>, Stefaan De Henauw<sup>11†</sup>, Maira Bes-Rastrollo<sup>12,13,14,15†</sup>, Eva S. Schernhammer<sup>7,16†</sup>, Monika Cahova<sup>1†</sup>
+
 </div>
+
+<br>
+
+<sup>†</sup> These authors have contributed equally to this work and share first/last authorship 
+
+<sup>1</sup> Institute for Clinical and Experimental Medicine, Department of Hepatogastroenterology, Prague, CR, Czech Republic  
+<sup>2</sup> Faculty of Science, Charles University, Prague, Czech Republic  
+<sup>3</sup> Institute of Microbiology, The Czech Academy of Sciences, Prague, Czech Republic  
+<sup>4</sup> Department of Internal Medicine, University Hospital Kralovske Vinohrady, Third Faculty of Medicine, Charles University, Prague, Czech Republic  
+<sup>5</sup> Faculty of Food and Biochemical Technology, University of Chemistry and Technology, Prague, Czech Republic  
+<sup>6</sup> Faculty of Chemical Technology, University of Chemistry and Technology, Prague, Czech Republic  
+<sup>7</sup> Department of Epidemiology, Center for Public Health, Medical University of Vienna, Vienna, Austria  
+<sup>8</sup> Research Institute for Plant-Based Nutrition, Giessen, Germany  
+<sup>9</sup> Department of Health Professions, Division of Nutrition and Dietetics, Bern University of Applied Sciences, Bern, Switzerland  
+<sup>10</sup> Laboratory of Nutrition and Metabolic Epigenetics, Institute of Food, Nutrition and Health, ETH Zürich, Zürich, Switzerland  
+<sup>11</sup> Department of Public Health and Primary Care, Faculty of Medicine and Health Sciences, Ghent University, Ghent, Belgium  
+<sup>12</sup> Department of Preventive Medicine and Public Health, University of Navarra, Pamplona, Spain  	
+<sup>13</sup> Institute for Nutrition and Health (INS), University of Navarra, Pamplona, Spain  
+<sup>14</sup> Navarra Health Research Institute (IdiSNA), Pamplona, Spain  
+<sup>15</sup> CIBERobn, Instituto de Salud Carlos III, Madrid, Spain  
+<sup>16</sup> Department of Epidemiology, Harvard T.H. Chan School of Public Health, Boston, MA, USA  
+
+---------------------------------------------------------------------------------------------------
 
 ## General information
 
-This repository provides a comprehensive report of the study **The serum metabolome reflects VEGANScreener-assessed diet quality across five European vegan populations**
+This repository provides a comprehensive report of the study **The serum metabolome reflects VEGANScreener-assessed diet quality in vegans from five European countries**
 
 All reported results can be reproduced using the code in this repository. Feel free to contact Petra Polakovicova by [petra.polakovicova@ikem.cz](petra.polakovicova@ikem.cz) if you have any questions about the computational part of the study.
 
@@ -18,8 +44,8 @@ If you find this code and report helpful, cite the original publication:
 
 💾 **Data Availability**
 
-Metabolomic data for this study have been uploaded to MetaboLights database under accession number (TO BE ADDED).
-
+Metabolomic data for this study data have been deposited in the ASEP repository with the dataset
+identifier xxx (TO BE ADDED). 
 
 ## Report info
 
@@ -102,11 +128,10 @@ The code with reported results can be found:
 **Figures included in the original publication**:
 - [Figures](https://xpolak37.github.io/VEGANScreener_metabolome/analysis/scripts/VSmetabo_Figures.html): code generating the manuscript's main and supplementary figures
 
-
 ---------------------------------------------------------------------------------------------------
 
-## Acknowledgment
+## Funding
 
-(TO BE ADDED)
+The VEGANScreener Study was supported by ERA-Net HDHL-INTIMIC through the "Standardized measurement, monitoring and/or biomarkers to study food intake, physical activity and health" (STAMIFY 2021) call, running 2022–2025, and by the European Union's Horizon 2020 Research and Innovation Programme under grant agreement No. 727565. This study was further supported by the MH CZ-DRO (Institute for Clinical and Experimental Medicine-IKEM, IN 00023001), and by the Ministry of Health of the Czech Republic in cooperation with the Czech Health Research Council under project No. NW26A-CARDIA. This research was carried out within National Institute CarDia, LX22NPO5104 (Next Generation EU). It was also supported by the Swiss National Science Foundation (SNSF, Grant Nr. 320030L-236107), Philhuman-Stiftung (Vaduz) and for the Czech site the Czech Science Foundation (Grant Nr. 25-19309L) through a coordinated bilateral research grant.
 
 

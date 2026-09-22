@@ -29,24 +29,24 @@ project:
 fontsize: 12 px
 ---
 
-**This code is used to explore patterns in the metabolome profiles of vegans, particularly by linking them to the VEGANScreener score (VS_total).**
+**This script explores patterns in the metabolome profiles of vegans, particularly by linking them to the VEGANScreener score (VS_total).**
 
 
-The script is divided into two parts, according to the integration method of metabolome datasets (see preprocessing scripts for details). At first, the **sPCA dataset** is analyzed. This dataset is used for multivariate analysis, PCA visualization, PERMANOVA and ML approach. The **concatenated dataset** of both LCMS and NMR is used for univariate analysis. 
+The script is divided into two parts, based on how the metabolome datasets were integrated (see the preprocessing scripts for details). The first part analyzes the **sPCA dataset**, which is used for multivariate analysis, PCA visualization, PERMANOVA, and the machine-learning models. The second part uses the **concatenated dataset** (LC-MS and NMR combined) for the univariate analysis. 
 
-The main parts of the analysis is composed of:
+The analysis is composed of the following main parts:
 
-1.  Global visualization - 3 components color-coding **VS_total**
+1.  Global visualization — the first three components, color-coded by **VS_total**.
 
-2.  PERMANOVA - how much of the variation can be explained by various external variables:
+2.  PERMANOVA — how much of the variation can be explained by various external variables:
   dist(Metabolome) \~ sex + bmi + age + veganDuration + country***VS_total**
 
-3.  Univariate analysis (feature-wise model) - linear modelling of metabolite using various external variables:
+3.  Univariate analysis (feature-wise model) — linear modelling of each metabolite against various external variables:
   Metabolite \~  sex + bmi + age + veganDuration + Country***VS_total**
   
-4.  Random fores (RF) classification - the model is trained and validated through bootstrapping with 500 iterations. The RF model is used to distinguish between participants with **1st and 3rd tercile of VS_total**. The two types of models are trained:
-a) ML model on original sPCA dataset
-b) ML model on sPCA dataset after regressing out the covariates.
+4.  Random forest (RF) classification — the model is trained and validated by bootstrapping with 500 iterations, and used to distinguish between participants in the **1st and 3rd tertiles of VS_total**. Two types of models are trained:
+a) a model on the original sPCA dataset
+b) a model on the sPCA dataset after regressing out the covariates.
 
 ```{r,echo=FALSE}
 source("custom_functions_vegans.R")
@@ -73,7 +73,7 @@ spca_integrated_df <-  read.table(
 
 ```
 
-**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
+**Scaling** — when metadata columns are used as covariates, they need to be scaled so that each has a mean of 0 and a standard deviation of 1.
 
 ```{r}
 metadata_scaled_df <- metadata_df
@@ -87,13 +87,13 @@ metadata_scaled_df <- metadata_scaled_df %>%
 
 # Descriptive statistics
 
-Summary of counts per diet group, country and sex:
+Summary of participant counts by diet group, country, and sex:
 
 ```{r}
 metadata_df %>% dplyr::group_by(country,sex) %>% count()
 ```
 
-Basic plots for visualizing the distribution of selected variables:
+Basic plots showing the distribution of selected variables:
 
 ```{r,fig.width=15,fig.height=10}
 plot_list <- list()
@@ -137,10 +137,10 @@ wrap_plots(plot_list)
 
 # SPCA
 
-The SPCA dataset was created by concatenating LCMS and NMR dataset and applying Mixomics::spca() function. See preprocessing script for details. 
+The sPCA dataset was created by concatenating the LC-MS and NMR datasets and applying the mixOmics::spca() function. See the preprocessing script for details. 
 
-mixOmics::spca() performs **Sparse Principal Component Analysis**, which is similar to  regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
-This sparsity is controlled by penalization, making interpretation easier because irrelevant or noisy variables get loadings of zero.
+mixOmics::spca() performs **sparse Principal Component Analysis (sPCA)**, which works like regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
+The degree of sparsity is controlled by a penalization term, which makes the components easier to interpret because irrelevant or noisy variables are given loadings of zero.
 
 ## Visualization
 
@@ -321,15 +321,15 @@ metadata_df %>%
 
 ## PERMANOVA
 
-The test show how much of the variation in metabolomics is explained by: sex - age - bmi -vegan duration - Country - **VS_total**
+The test shows how much of the variation in the metabolome is explained by sex, age, BMI, vegan duration, country, and **VS_total**.
 
-Variables were added sequentially (Type I SS), so each p-value and R² reflects a partial effect, after adjusting for those above. This model accounts for variation due to sex, age, vegan diet duration, BMI and country of origin. Then accounts for the main effects of VS_total. Then tests whether the effect of VS_total varies by country of origin (interaction).
+Variables were added sequentially (Type I sums of squares), so each p-value and R² reflects a partial effect after adjusting for the variables above it. The model first accounts for variation due to sex, age, vegan diet duration, BMI, and country of origin. It then accounts for the main effect of VS_total, and finally tests whether the effect of VS_total varies by country of origin (the interaction term).
 
 ----------------------
 
-VS_total explains **2.588%** of variation after adjusting for sex, age, bmi,country and duration of the diet. This result is statistically significant (p<0.001).
+VS_total explains **2.588%** of the variation after adjusting for sex, age, BMI, country, and diet duration. This result is statistically significant (p<0.001).
 
-However, the country of origin is still explaining the most of the variation ~ **10%**. The interaction effect is not significant, which suggest the differences in VS_total is not inconsistent throughout the countries.
+However, country of origin still explains the largest share of the variation, around **10%**. The interaction effect is not significant, suggesting that the effect of VS_total is consistent across countries.
 
 ```{r}
 # Create Euclidean distance matrix
@@ -487,7 +487,7 @@ save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_mode
 
 ### Original model
 
-**PC5** and **PC10** are the most important for RF model.
+**PC5** and **PC10** are the most important variables for the RF model.
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/VS_tertile_vegan/rf_model.RData")
@@ -504,7 +504,7 @@ ggplot(var_imp) +
 
 ### Adjusted model
 
-Similarly as above, the most important is **PC5**, with significant drop of importance after this PC. 
+As above, **PC5** is the most important variable, with a marked drop in importance for the PCs after it. 
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/adjusted_vstotal_model_vegan/rf_model.RData")
@@ -521,7 +521,7 @@ ggplot(var_imp) +
 
 ### Visualization
 
-To explore the important PCs, their visualization is shown below. We will show **PC5**, as it was consistently picked by two models and **PC10** as this PC remained in the list of the most important PCs after adjustment. 
+To explore the important PCs, their visualizations are shown below. We show **PC5**, which was consistently selected by both models, and **PC10**, which remained among the most important PCs after adjustment. 
 
 
 ```{r,fig.width=4,fig.height=3}
@@ -586,10 +586,10 @@ dev.off()
 
 ## SPCA loadings {#SPCA_loadings}
 
-Here, we will explore the loadings of the most important PC (**PC5**)
+Here, we explore the loadings of the most important PC (**PC5**).
 
 ```{r,collapse=TRUE}
-load("../results/preprocessing/spca_result_vegans_INT_v2.RData")
+load("../results/preprocessing/spca_result_vegans_INT_v3.RData")
 df <- data.frame (
   Metabolite=names(spca_result$loadings$X[,5]),
   Loading=spca_result$loadings$X[,5])
@@ -597,7 +597,7 @@ df <- data.frame (
 write.table(df,sep="\t","../results/vegan/Q2_VStotal/loadings_PC5.tsv")
 ```
 
-This plot shows the loading of individual metabolites to **PC5**, ordered by its absolute value.
+This plot shows the loadings of individual metabolites on **PC5**, ordered by absolute value.
 
 ```{r,fig.height=10,fig.width=5,collapse=TRUE}
 ggplot(df %>% 
@@ -702,13 +702,13 @@ dev.off()
 
 ## Univariate analysis
 
-We will test the differences between diets and VS total using generalize linear model while adjusting for covariates.
+We test the differences between diets and VS_total using a generalized linear model, while adjusting for covariates.
 
 ### Metabolite-wise model
 
 #### Continuous analysis
 
-Call glm to explore which metabolites are significantly related to VS score while adjusting for age, sex, Country and dietary group:
+A GLM is used to identify which metabolites are significantly related to the VS score, adjusting for age, sex, country, and dietary group:
 
 Metabolite ~ sex + bmi + age + eq_vegan_dur_total + Country*VS_total
 
@@ -721,7 +721,7 @@ results_df <- do.call(rbind, results_list)
 results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
 ```
 
-Look at significant results - **9 metabolites**
+Significant results — **9 metabolites**:
 
 ```{r}
 results_df %>%
@@ -741,7 +741,7 @@ write.table(results_all,"../results/vegan/Q2_VStotal//lm_continous_all.tsv",
             sep="\t")
 ```
 
-Check the interaction effect - **none**
+Interaction effect — **none**:
 
 ```{r}
 df <- results_df %>%
@@ -990,7 +990,7 @@ metabolite_nodes %>% arrange(desc(degree))
 ```
 
 **Weighted degree**
-- Should reflect cumulative association magnitude, not just number of links.
+- reflects the cumulative magnitude of associations, not just the number of links.
 
 ```{r}
 strength_vals <- strength(g, weights = E(g)$weight)
@@ -1144,6 +1144,7 @@ p_all
 ```
 
 
+
 # Final significant metabolites
 
 ```{r,fig.height=10,fig.width=15}
@@ -1166,7 +1167,7 @@ final_significance
 
 ## Continuous univariate test
 
-To create a vegan index based on concatenated dataset, we will use linear regression in order to get coefficients on significant variables that were revealed across the analysis:
+To build a vegan index from the concatenated dataset, we use linear regression to obtain coefficients for the significant variables identified across the analysis:
 
 ```{r}
 sign <- final_significance
@@ -1174,29 +1175,41 @@ sign
 ```
 
 
+
 ```{r}
 # define the variables
 plot_list <- list()
 rhos <- rep(NA,5)
+ps <- rep(NA,5)
 
 # split the datasets for cross-validation
 concat_for_index <- concat_for_uni[sample(rownames(concat_for_uni)),]
 cv_splits <- cv_folds(concat_for_index,folds = 5)
 
-# define formula - significant metabolites
-vars <- sign
-# Wrap all variable names in backticks
-vars_safe <- paste0("`", vars, "`")
-
-# Create the formula
-fml <- as.formula(paste("VS_total ~", paste(vars_safe, collapse = " + ")))
-
 final_df_veganindex <- data.frame()
 
 # cross validation loop
+vars_selection <- list()
 for (i in 1:length(cv_splits)){
+  unisub_df <- concat_for_uni[cv_splits[[i]]$train,]
+  results_list <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_glm(x,unisub_df,
+                                           tested_variable = "VS_total"))
+  results_df <- do.call(rbind, results_list)
+  
+  results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
+
+  vars <- results_df$metabolite[results_df$p_adjusted<0.05 & results_df$variable=="VS_total"]
+  vars_selection[[i]] <- vars
+  
+  # Wrap all variable names in backticks
+  vars_safe <- paste0("`", vars, "`")
+  
+  fml <- as.formula(paste("VS_total ~", paste(vars_safe, collapse = " + ")))
+  
   # fit the model
-  model <- lm(fml, data = concat_for_uni[cv_splits[[i]]$train,])
+  model <- lm(fml, unisub_df)
+  
   # predict the result on validation dataset
   VG_index <- stats::predict(model,concat_for_uni[cv_splits[[i]]$val,])
   
@@ -1223,7 +1236,7 @@ for (i in 1:length(cv_splits)){
 
   plot_list[[i]] <- p
   rhos[i] <- round(cor_val,2)
-  
+  ps[i] <- cor_test$p.value
 }
 
 ```
@@ -1262,10 +1275,17 @@ mean(rhos)
             axis.text=element_text(face="bold",size=12),
             axis.title = element_text(face="bold",size=15)) + 
     ggtitle(paste("Rho =",round(cor_val,2))) + 
-    xlab("Metabolite-based Vegan score") + 
-    ylab("Vegan score (z-scored)") 
+    xlab("Metabolite-based VEGANScreener score") + 
+    ylab("VEGANScreener score (z-scored)") 
   
 p 
+```
+
+```{r}
+# Fisher's method to combine p-values
+library(metap)
+combined_p <- sumlog(ps)$p
+combined_p
 ```
 
 ```{r,fig.height=4,fig.width=5}
@@ -1329,7 +1349,7 @@ p_heat <- ggplot(df_long, aes(x = Participant, y = Metabolite, fill = value)) +
         panel.grid = element_blank(),
         legend.position = "right") + 
   labs(fill = "Median metabolite z-score") +
-  xlab("Vegans (ordered and grouped by Vegan score)") + 
+  xlab("Vegans (ordered and grouped by VEGANScreener score)") + 
   ylab("") + 
   scale_fill_gradient2(
     low = "darkcyan", mid = "white", high = "brown", midpoint = 0)

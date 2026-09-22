@@ -29,25 +29,25 @@ project:
 fontsize: 12 px
 ---
 
-**This code is used to explore patterns in the metabolome profiles of vegans, particularly to distinguish between different countries of origin.**
+**This script explores patterns in the metabolome profiles of vegans, with a focus on distinguishing between different countries of origin.**
 
-The script is divided into two parts, according to the integration method of the metabolome datasets (see preprocessing scripts for details). At first, the **sPCA dataset** is analyzed. This dataset is used for multivariate analysis, visualization, PERMANOVA testing and ML approach. The **concatenated dataset** of both LCMS and NMR is used for the univariate analysis - linear modelling with a visualization thorugh the bipartite graphs. 
+The script is divided into two parts, based on how the metabolome datasets were integrated (see the preprocessing scripts for details). The first part analyzes the **sPCA dataset**, which is used for multivariate analysis, visualization, PERMANOVA testing, and the machine-learning models. The second part uses the **concatenated dataset** (LC-MS and NMR combined) for the univariate analysis: linear modelling, visualized through bipartite graphs. 
 
-The main parts of the analysis is composed of:
+The analysis is composed of the following main parts:
 
-1.  Global visualization - 3 components color-coding country.
+1.  Global visualization — the first three components, color-coded by country.
 
-2.  PERMANOVA - how much of the variation can be explained by various external variables:
+2.  PERMANOVA — how much of the variation can be explained by various external variables:
   dist(Metabolome) \~ sex + bmi + age + VS_total + veganDuration + country
 
-3.  Univariate analysis (feature-wise model) - linear modelling of metabolite using various external variables:
+3.  Univariate analysis (feature-wise model) — linear modelling of each metabolite against various external variables:
   Metabolite \~  sex + bmi + age + VS_total + veganDuration + country
   
-Individual means and p-values are obtained by the emmeans() function. The bipartite network is then constructed and color-coded based on the strongest association to the analyzed factor.
+Individual means and p-values are obtained with the emmeans() function. A bipartite network is then constructed and color-coded according to the strongest association with the analyzed factor.
 
-4.  Random forest (RF) classification - the model is trained and validated through bootstrapping with 500 iterations. The RF model is used to distinguish country of origin. The two types of models are trained:
-a) ML model on original sPCA dataset
-b) ML model on sPCA dataset after regressing out the covariates.
+4.  Random forest (RF) classification — the model is trained and validated by bootstrapping with 500 iterations, and used to distinguish country of origin. Two types of models are trained:
+a) a model on the original sPCA dataset
+b) a model on the sPCA dataset after regressing out the covariates.
 
 ```{r,echo=FALSE}
 source("custom_functions_vegans.R")
@@ -75,7 +75,7 @@ spca_integrated_df <-  read.table(
 ```
 
 
-**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
+**Scaling** — when metadata columns are used as covariates, they need to be scaled so that each has a mean of 0 and a standard deviation of 1.
 
 ```{r}
 metadata_scaled_df <- metadata_df
@@ -89,13 +89,13 @@ metadata_scaled_df <- metadata_scaled_df %>%
 
 # Descriptive statistics
 
-Summary of counts per diet group, country and sex:
+Summary of participant counts by diet group, country, and sex:
 
 ```{r}
 metadata_df %>% dplyr::group_by(country,sex) %>% count()
 ```
 
-Basic plots for visualizing the distribution of selected variables:
+Basic plots showing the distribution of selected variables:
 
 ```{r,fig.width=10,fig.height=5}
 plot_list <- list()
@@ -139,10 +139,10 @@ wrap_plots(plot_list)
 
 # SPCA
 
-The SPCA dataset was created by concatenating LCMS and NMR dataset and applying Mixomics::spca() function. See preprocessing script for details. 
+The sPCA dataset was created by concatenating the LC-MS and NMR datasets and applying the mixOmics::spca() function. See the preprocessing script for details. 
 
-mixOmics::spca() performs **Sparse Principal Component Analysis**, which is similar to regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
-This sparsity is controlled by penalization, making interpretation easier because irrelevant or noisy variables get loadings of zero.
+mixOmics::spca() performs **sparse Principal Component Analysis (sPCA)**, which works like regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
+The degree of sparsity is controlled by a penalization term, which makes the components easier to interpret because irrelevant or noisy variables are given loadings of zero.
 
 ## Visualization
 
@@ -288,11 +288,11 @@ dev.off()
 
 ## PERMANOVA
 
-The test shows how much of the variation in metabolomics is explained by: sex - age - bmi - VS total - vegan duration - Country
+The test shows how much of the variation in the metabolome is explained by sex, age, BMI, VS_total, vegan duration, and country.
 
-Variables were added sequentially (Type I SS), so each p-value and R² reflects a partial effect, after adjusting for those above. This model accounts for variation due to sex, age, vegan diet duration and BMI. Then accounts for the main effects of country. 
+Variables were added sequentially (Type I sums of squares), so each p-value and R² reflects a partial effect after adjusting for the variables above it. The model first accounts for variation due to sex, age, vegan diet duration, and BMI, and then for the main effect of country. 
 
-Country explains **9.02%** of variation after adjusting for sex, age, bmi, VS_total and duration of the diet. This result is statistically significant (p<0.001).
+Country explains **9.08%** of the variation after adjusting for sex, age, BMI, VS_total, and diet duration. This result is statistically significant (p<0.001).
 
 ```{r}
 metadata_to_test <- metadata_scaled_df %>% drop_na(VS_total,vegan_duration)
@@ -346,7 +346,7 @@ pp_main
 
 ## RF model
 
-Model performance significance was assessed using a bootstrap-based z-test. The AUC was estimated over 500 bootstrap resamples, and the bootstrap standard error was used to compute a Wald-type statistic z = (A − 0.5)/SE, with p-values obtained from the standard normal distribution.
+Model performance was tested for significance using a bootstrap-based z-test. The AUC was estimated over 500 bootstrap resamples, and the bootstrap standard error was used to compute a Wald-type statistic, z = (AUC − 0.5)/SE, with p-values obtained from the standard normal distribution.
 
 ### Original model
 
@@ -475,7 +475,7 @@ save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_mode
 
 ### Original model
 
-**PC4** and **PC10** are the most important for RF model. However, no significant drop occurred in other PCs.
+**PC4** and **PC10** are the most important variables for the RF model, although the importance does not drop off sharply across the remaining PCs.
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/country_model_vegan/rf_model.RData")
@@ -492,7 +492,7 @@ ggplot(var_imp) +
 
 ### Adjusted model
 
-Similarly as above, the most important is **PC4**. The PC10 dropped comparing to 1st value in the original model.
+As above, **PC4** is the most important variable, while **PC10** drops in importance compared with the original model.
 
 ```{r}
 load("../intermediate_files/models/adjusted_country_model_vegan/rf_model.RData")
@@ -509,7 +509,7 @@ ggplot(var_imp) +
 
 ### Visualization
 
-To explore these two important PCs more, their visualization is shown below. 
+To explore these two important PCs further, their visualizations are shown below. 
 
 *PCA* 
 
@@ -576,10 +576,10 @@ dev.off()
 
 ## SPCA loadings
 
-Here, the loadings of the two important PCs (**PC4** and **PC10**) are explored and saved.
+Here, the loadings of the two important PCs (**PC4** and **PC10**) are examined and saved.
 
 ```{r,collapse=TRUE}
-load("../results/preprocessing/spca_result_all.RData")
+load("../results/preprocessing/spca_result_vegans_INT_v3.RData")
 
 df <- data.frame (
   Metabolite=names(spca_result$loadings$X[,4]),
@@ -590,7 +590,7 @@ df
 write.table(df,sep="\t","../results/vegan/Q1_country/loadings_PC4.tsv")
 ```
 
-This plot shows the loading of individual metabolites to **PC4**, ordered by its absolute value.
+This plot shows the loadings of individual metabolites on **PC4**, ordered by absolute value.
 
 ```{r,fig.height=10,fig.width=5,collapse=TRUE}
 ggplot(df %>% dplyr::mutate(
@@ -613,7 +613,7 @@ df <- data.frame (
 write.table(df,sep="\t","../results/vegan/Q1_country/loadings_PC10.tsv")
 ```
 
-This plot shows the loading of individual metabolites to **PC10**, ordered by its absolute value.
+This plot shows the loadings of individual metabolites on **PC10**, ordered by absolute value.
 
 ```{r,fig.height=10,fig.width=5,collapse=TRUE}
 ggplot(df %>% 
@@ -708,7 +708,7 @@ dev.off()
 
 ## Univariate analysis
 
-The lm model is used to test the differences in countries, while adjusting for covariates:
+A linear model (lm) is used to test for differences between countries while adjusting for covariates:
 
 Metabolite ~ sex + bmi + age + VS_total + vegan_duration + Country
     
@@ -813,7 +813,7 @@ country_colors <- c(
   "CH" = "#D52B1E"   # red
 )
 
-# Optional: order metabolites by mean effect size
+# order metabolites by mean effect size
 forest_df <- country_effects %>%
   group_by(metabolite) %>%
   mutate(range_eff = mean(range)) %>%
@@ -969,20 +969,19 @@ ggraph(g, layout = "fr") +
 
 #### Degree calculation
 
-A country with high degree means it has many metabolites significantly associated with it.
-We can interpret it in different ways. It has:
-- Strong metabolic distinctiveness
-- Broad metabolic shift
-- Possibly strong dietary/cultural metabolic signature
-- Or stronger statistical power !!
+A country with a high degree has many metabolites significantly associated with it. This can be interpreted in several ways:
+- strong metabolic distinctiveness
+- a broad metabolic shift
+- possibly a strong dietary or cultural metabolic signature
+- or simply greater statistical power
 
-High-degree metabolite can mean:
-- High cross-country variability
-- Reflects common axis of variation
+A high-degree metabolite can indicate:
+- high cross-country variability
+- a shared axis of variation
 
-Low-degree metabolite (1–2 countries)
-- More country-specific signal
-- Better candidate geographic biomarker
+A low-degree metabolite (linked to only 1–2 countries) suggests:
+- a more country-specific signal
+- a better candidate as a geographic biomarker
 
 ```{r}
 # Calculate degree
@@ -1004,7 +1003,7 @@ metabolite_nodes %>% arrange(desc(degree))
 ```
 
 **Weighted degree**
-- Should reflect cumulative association magnitude, not just number of links.
+- reflects the cumulative magnitude of associations, not just the number of links.
 
 ```{r}
 strength_vals <- strength(g, weights = E(g)$weight)

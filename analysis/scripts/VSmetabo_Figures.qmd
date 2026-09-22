@@ -34,6 +34,7 @@ This code shows all the figures reported in the original publication of this stu
 library(ggplot2)
 library(patchwork)
 library(ggplotify)
+library(patchwork)
 source("custom_functions_vegans.R")
 ```
 
@@ -57,18 +58,18 @@ labels = c("country_ES" = "Country (ES)",
            "country_BE" = "Country (BE)",
           "country_CZ" = "Country (CZ)",
           "country" = "Country",
-           "VS_total" = "Veganscreener score",
-          "VS_total_plus" = "Veganscreener score (+)",
-            "VS_total_minus" = "Veganscreener score (-)",
+           "VS_total" = "VS score",
+          "VS_total_plus" = "VS score (+)",
+            "VS_total_minus" = "VS score (-)",
            "sex" = "Sex",
            "UPF_perc_avg" = "UPF",
            "age" = "Age",
             "bmi" = "BMI",
           "diet_supplements" = "Supplementation",
           "vegan_duration" = "Vegan diet duration",
-           "pdi_an_avg" = "PDI",
-          "updi_an_avg" = "uPDI",
-          "hpdi_an_avg" = "hPDI")
+           "pdi_avg" = "PDI",
+          "updi_avg" = "uPDI",
+          "hpdi_avg" = "hPDI")
 
 f2a <- f2a + scale_x_discrete(labels=labels) + ggtitle("")
 f2b <- f2b + scale_y_discrete(labels=labels) + ggtitle("") 
@@ -89,7 +90,8 @@ p <- (f2a | f2b) +
   plot_annotation(tag_levels = 'A') &
   theme(plot.tag = element_text(size = 20, face = 'bold')) 
 
-ggsave(plot=p,"../results/vegan/figures/Figure_2.png", height=7,width=14)
+ggsave(plot=p,"../results/vegan/figures/Figure_2.png", height=7,width=15)
+ggsave(plot=p,"../results/vegan/figures/Figure_2.pdf", height=7,width=15)
 ```
 
 # Figure 3
@@ -134,6 +136,7 @@ p <- f3a_free + f3b + f3c + f3d +
   plot_annotation(tag_levels = "A") &
   theme(plot.margin = margin(3, 3, 3, 3),
         plot.tag = element_text(face = "bold", size = 20))
+
 ```
 
 ```{r}
@@ -154,13 +157,11 @@ load("../intermediate_files/models/adjusted_pdi_model_vegan/rf_model.RData")
 pdi_model <- rf_model
 load("../intermediate_files/models/adjusted_hpdi_model_vegan/rf_model.RData")
 hpdi_model <- rf_model
-load("../intermediate_files/models/adjusted_updi_model_vegan/rf_model.RData")
-updi_model <- rf_model
 load("../intermediate_files/models/adjusted_upf_model_vegan/rf_model.RData")
 upf_model <- rf_model
 
-model_objects <- list(vs_model,updi_model,upf_model)
-names(model_objects) <- c("Veganscreener score", "uPDI","UPF")
+model_objects <- list(vs_model,hpdi_model,upf_model)
+names(model_objects) <- c("VS score", "hPDI","UPF")
 
 ```
 
@@ -278,18 +279,14 @@ p <- make_multi_roc_curve_indexes(model_objects,CI=TRUE)
 ```
 
 ```{r}
+p
+```
+
+```{r}
 f <- p
 save(f,file="../results/vegan/figures/F4c_ROC.RData")
 ```
 
-```{r}
-load("../results/vegan/figures/FS_ROC.RData")
-```
-
-```{r}
-f <- p
-save(f,file="../results/vegan/figures/FS_ROC.RData")
-```
 
 ```{r,echo=FALSE}
 pdf("../results/vegan/Q3b_UPF/roc_all.pdf",width = 6,height = 5)
@@ -311,28 +308,29 @@ library(patchwork)
 library(ggtext)
 
 index_colors <- c(
-  "Veganscreener score"    = "darkgreen",
-  "Veganscreener score (+)"   = "#74C69D",
-  "Veganscreener score (-)"   = "#B7E4C7",
+  "VS score"    = "darkgreen",
+  "VS score (+)"   = "#74C69D",
+  "VS score (-)"   = "#B7E4C7",
   "PDI"   = "darkorange",
   "hPDI"  = "#C9884B",
-  "uPDI"  = "#F2A93B",
   "UPF" = "#0072B2"
 )
 
 # ---- PANEL A DATA ------------------------------------------
 perf_data <- tibble(
-  Index   = factor(rep(c("Veganscreener score","Veganscreener score (+)","Veganscreener score (-)", "PDI","hPDI","uPDI","UPF"), 2),
-                   levels = c("Veganscreener score","Veganscreener score (+)","Veganscreener score (-)", "PDI","hPDI","uPDI","UPF")),
-  Metric  = rep(c("PERMANOVA R² (%)", "AUC"), each = 7),
-  Value   = c(2.60, 1.80, 2.27, 0.22 , 2.01, 2.12, 1.49, # PERMANOVA
-              0.74, 0.69, 0.64, 0.48, 0.66, 0.69, 0.62), # AUC
-  CI_low  = c(rep(NA, 7),   # no CI for PERMANOVA
-              0.64, 0.61, 0.54, 0.37, 0.62, 0.60, 0.46),  # AUC CIL
-  CI_high = c(rep(NA, 7),
-              0.82, 0.78, 0.73, 0.58, 0.75, 0.78, 0.69),  # AUC CIU
-  Sig     = c(TRUE, TRUE, TRUE, FALSE, TRUE, TRUE, TRUE,
-              NA,   NA,   NA,   FALSE,   NA,   NA, FALSE)
+  Index   = factor(rep(
+    c("VS score","VS score (+)","VS score (-)",
+      "PDI","hPDI","UPF"), 2),
+    levels = c("VS score","VS score (+)","VS score (-)", "PDI","hPDI","UPF")),
+  Metric  = rep(c("PERMANOVA R² (%)", "AUC"), each = 6),
+  Value   = c(2.60, 1.80, 2.27, 0.28 , 2.41,  1.49, # PERMANOVA
+              0.73, 0.69, 0.64, 0.46, 0.70, 0.62), # AUC
+  CI_low  = c(rep(NA, 6),   # no CI for PERMANOVA
+              0.64, 0.61, 0.54, 0.35, 0.59, 0.46),  # AUC CIL
+  CI_high = c(rep(NA, 6),
+              0.81, 0.78, 0.73, 0.56, 0.79, 0.69),  # AUC CIU
+  Sig     = c(TRUE, TRUE, TRUE, FALSE, TRUE, TRUE,
+              NA,   NA,   NA,   FALSE,   NA, FALSE)
 )
 
 # reference lines per facet
@@ -379,8 +377,16 @@ p_auc <- ggplot(perf_data %>% dplyr::filter(Metric=="AUC"), aes(x = Index, y = V
     panel.grid.major.x = element_blank(),
     panel.grid.minor   = element_blank(),
     axis.text.x      = element_text(face = "bold",angle=60,hjust = 1),
-    plot.title       = element_blank()
-  ) 
+    plot.title       = element_blank(),
+    axis.ticks.x = element_line(size=0.3,color = "black"),
+    axis.ticks.y =element_line(size=0.3,color="black"),
+            axis.ticks.length = unit(4,"pt"),
+            axis.text=element_text(face="bold"),
+            axis.title = element_text(face="bold",size=15),
+            legend.position = c(0.98, 0.02),
+            legend.justification = c("right", "bottom")
+  )  
+            
 
 ```
 
@@ -444,23 +450,21 @@ col_na   <- "grey92"   # light grey   → not significant
 vs_total <- fread("../results/vegan/Q2_VStotal/lm_continous.tsv")
 vs_total_plus <- fread("../results/vegan/Q2_VStotal_plus/lm_continous.tsv")
 vs_total_minus <- fread("../results/vegan/Q2_VStotal_minus/lm_continous.tsv")
-pdi <- fread("../results/vegan/Q3a_PDI//lm_continous.tsv")
-hpdi <- fread("../results/vegan/Q3a_hPDI/lm_continous.tsv")
-updi <- fread("../results/vegan/Q3a_uPDI/lm_continous.tsv")
-upf <- fread("../results/vegan/Q3b_UPF//lm_continous.tsv")
+pdi <- fread("../results/vegan/Q3_PDI//lm_continous.tsv")
+hpdi <- fread("../results/vegan/Q3_hPDI/lm_continous.tsv")
+upf <- fread("../results/vegan/Q4_UPF//lm_continous.tsv")
 ```
 
 ```{r}
 all_df <- rbind(vs_total,vs_total_plus,vs_total_minus,
-                pdi,hpdi,updi,upf)
+                pdi,hpdi,upf)
 
 var_levels <- c(
-  "VS_total"       = "Veganscreener score",
-  "VS_total_plus"  = "Veganscreener score (+)",
-  "VS_total_minus" = "Veganscreener score (-)",
-  "pdi_an_avg"            = "PDI",
-  "hpdi_an_avg"           = "hPDI",
-  "updi_an_avg"           = "uPDI",
+  "VS_total"       = "VS score",
+  "VS_total_plus"  = "VS score (+)",
+  "VS_total_minus" = "VS score (-)",
+  "pdi_avg"            = "PDI",
+  "hpdi_avg"           = "hPDI",
   "UPF_perc_avg"   = "UPF"
 )
 
@@ -479,8 +483,12 @@ wide_df <- all_df %>%
   dplyr::select(Metabolite, variable, direction) %>%
   pivot_wider(names_from = variable, values_from = direction,
               values_fill = 0L) %>%                          # missing combos -> 0
-  dplyr::select(Metabolite, `Veganscreener score`, `Veganscreener score (+)`, `Veganscreener score (-)`,
-         PDI, hPDI, uPDI,UPF)
+  dplyr::select(Metabolite, `VS score`, `VS score (+)`, `VS score (-)`,
+         PDI, hPDI,UPF)
+
+wide_df$Metabolite <- gsub("Indoleacrylic.acid",
+                           "Indoleacrylic acid",
+                           wide_df$Metabolite)
 ```
 
 ```{r}
@@ -506,7 +514,7 @@ cluster_order <- c(
   # Antioxidant / gut-microbiome
   "Indoleacrylic acid", "Ergothioneine", "Acetylornithine", 
   "Glutamine", "Phenylbutyrylglutamine",
-  "3-Methyl-2-oxovalerate", "Glutarylcarnitine",  
+  "3-Methyl-2-oxovalerate", "2-Hydroxybutyrate", "Glutarylcarnitine",
   # Saturated / atherogenic lipids (negative)
   "PC(34:1)", "PC(32:1)", "SM(d42:2)", 
   "SM(d38:2)","SM(d32:1)", "SM(d34:1)", 
@@ -519,7 +527,7 @@ heat_long <- wide_df %>%
   pivot_longer(-Metabolite, names_to = "Index", values_to = "Direction") %>%
   mutate(
     Metabolite = factor(Metabolite, levels = rev(cluster_order)),
-    Index      = factor(Index, levels = rev(c("Veganscreener score","Veganscreener score (+)","Veganscreener score (-)","PDI","hPDI","uPDI","UPF"))),
+    Index      = factor(Index, levels = rev(c("VS score","VS score (+)","VS score (-)","PDI","hPDI","UPF"))),
     Fill       = case_when(
       Direction ==  1 ~ "UP",
       Direction == -1 ~ "DOWN",
@@ -572,7 +580,7 @@ load("../results/vegan/figures/F5a_VMI.RData")
 f5b <- f 
 load("../results/vegan/figures/F5c_hPMI.RData")
 f5c <- f 
-load("../results/vegan/figures/F5d_uPMI.RData")
+load("../results/vegan/figures/FS_UPF.RData")
 f5d <- f 
 load("../results/vegan/figures/F5e_Network.RData")
 f5e <- f 
@@ -587,10 +595,10 @@ BBBCCCDDDEEEEEE
 
 "
 f5a_free <- free(f5a, side = "rlb") 
-f5b_free <- free(f5b + xlab("Metabolite-based\nVeganscreener score") + 
-                   ylab("Veganscreener score"), side = "lb") 
+f5b_free <- free(f5b + xlab("Metabolite-based\nVS score") + 
+                   ylab("VS score (z-scored)"), side = "lb") 
 f5c_free <- free(f5c + xlab("Metabolite-based\nhPDI"), side = "lb") 
-f5d_free <- free(f5d + xlab("Metabolite-based\nuPDI"), side = "lb") 
+f5d_free <- free(f5d + xlab("Metabolite-based\nUPF"), side = "lb") 
 f5e_free <- free(f5e, side = "lb") 
 
 p <- f5a_free + f5b_free + f5c_free + f5d_free + f5e_free +
@@ -619,11 +627,21 @@ load("../results/vegan/figures/FS1.RData")
 p_forest
 ```
 
+```{r}
+ggsave(plot=p_forest,
+       filename = "../results/vegan/figures/Figure_S1.pdf",height = 15,width = 5)
+```
+
 ## FS2
 
 ```{r,fig.height=15,fig.width=5}
 load("../results/vegan/figures/FS2.RData")
 p_forest
+```
+
+```{r}
+ggsave(plot=p_forest,
+       filename = "../results/vegan/figures/Figure_S2.pdf",height = 15,width = 5)
 ```
 
 ## FS3
@@ -636,17 +654,22 @@ p_forest
 ```
 
 ```{r}
+ggsave(plot=p_forest,
+       filename = "../results/vegan/figures/Figure_S3.pdf",height = 15,width = 5)
+```
+
+## FS4
+
+```{r}
 load("../results/vegan/figures/FS_VMI_plus.RData")
 fsa <- f
 load("../results/vegan/figures/FS_VMI_minus.RData")
 fsb <- f
-load("../results/vegan/figures/FS_UPF.RData")
-fsc <- f
 ```
 
-```{r,fig.width=10,fig.height=4}
-p <- (fsa + xlab("Metabolite-based\nVeganscreener score (+)") + ylab("Veganscreener score (+) (z-scored)") |     fsb + xlab("Metabolite-based\nVeganscreener score (-)") + ylab("Veganscerener score (-) (z-scored)") | fsc) + 
-  plot_layout(widths = c(1, 1,1)) & 
+```{r,fig.width=7,fig.height=4}
+p <- (fsa + xlab("Metabolite-based\nVS score (+)") + ylab("VS score (+) (z-scored)") |     fsb + xlab("Metabolite-based\nVS score (-)") + ylab("VS score (-) (z-scored)")) + 
+  plot_layout(widths = c(1, 1)) & 
   plot_annotation(tag_levels = 'A') &
   theme(plot.tag = element_text(size = 20, face = 'bold')) 
 
@@ -654,7 +677,7 @@ p
 ```
 ```{r}
 ggsave(plot=p,
-       filename = "../results/vegan/figures/Figure_S4.png", height=4,width=10)
+       filename = "../results/vegan/figures/Figure_S4.png", height=4,width=7)
 ggsave(plot=p,
-       filename = "../results/vegan/figures/Figure_S4.pdf", height=4,width=10)
+       filename = "../results/vegan/figures/Figure_S4.pdf", height=4,width=7)
 ```

@@ -82,8 +82,6 @@ Below is an overview of the folder structure:
 	- `VSmetabo_Q4_UPF.qmd` – metabolome vs. ultra-processed food intake
 	- `VSmetabo_Q5_PDIgroups.qmd` – metabolites vs. individual PDI food groups
 
-  - `results` – results generated directly via provided scripts
-
 ## Methodology
 
 For detailed methodology, see the original publication. 
@@ -132,6 +130,6 @@ The code with reported results can be found:
 
 ## Funding
 
-The VEGANScreener Study was supported by ERA-Net HDHL-INTIMIC through the "Standardized measurement, monitoring and/or biomarkers to study food intake, physical activity and health" (STAMIFY 2021) call, running 2022–2025, and by the European Union's Horizon 2020 Research and Innovation Programme under grant agreement No. 727565. This study was further supported by the MH CZ-DRO (Institute for Clinical and Experimental Medicine-IKEM, IN 00023001), and by the Ministry of Health of the Czech Republic in cooperation with the Czech Health Research Council under project No. NW26A-CARDIA. This research was carried out within National Institute CarDia, LX22NPO5104 (Next Generation EU). It was also supported by the Swiss National Science Foundation (SNSF, Grant Nr. 320030L-236107), Philhuman-Stiftung (Vaduz) and for the Czech site the Czech Science Foundation (Grant Nr. 25-19309L) through a coordinated bilateral research grant.
+HDHL-INTIMIC: Standardized measurement, monitoring and/or biomarkers to study food intake, physical activity and health (STAMIFY 2021) in 2022–25. The VEGANScreener study is supported by ERA-Net HDHL-INTIMIC, the European Union’s Horizon 2020 Research and Innovation Programme under grant agreement No. 727565. The following institutes provide support: the Austrian Research Promotion Agency FFG (Austria; project no. FO999890542) and the Austrian Federal Ministry of Education, Science and Research (BMBWF); the Research Foundation Flanders FWO (Belgium, project no. G0G5121N); the Czech Ministry of Education, Youth, and Sports (Czech Republic, project no. 8F22003, Numbers of contracts: MSMT-88/2021-29/2 and MSMT-88/2021-29/3); MH CZ - DRO („Institute for Clinical and Experimental Medicine – IKEM, IN 00023001“); the Ministry of Health of the Czech Republic in cooperation with the Czech Health Research Council under project No. NW26A-CARDIA; Federal Ministry of Education and Research (BMBF) (Germany, project no. 01EA2202), and the Spanish Ministry of Science, Innovation and Universities within the framework of Next Generation EU (Spain, project no. AC21\_2/00015). Occident Foundation additionally supported the Spanish team (Research Award 2023).  The Swiss arm of the VEGANScreener study is supported by the Federal Food Safety and Veterinary Office (FSVO), Vontobel Foundation and Foundation for the encouragement of Nutrition Research in Switzerland (SFEFS).
 
 

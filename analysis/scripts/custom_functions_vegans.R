@@ -68,9 +68,9 @@ pca_plot <- function(df,metadata,color_col,perform_pca=TRUE,
     "vegan_duration" = c("#deebf7", "darkblue"),
     "duration_vegan_cat"= c("lightgreen","darkgreen"),
     "tertile_label" = c("#D73027", "#1A9850"),
-    "hpdi_an_avg" = c("#D73027", "#1A9850"),
-    "updi_an_avg" = c("#1A9850", "#D73027"),
-    "pdi_an_avg" = c("#D73027", "#1A9850"),
+    "hpdi_avg" = c("#D73027", "#1A9850"),
+    "updi_avg" = c("#1A9850", "#D73027"),
+    "pdi_avg" = c("#D73027", "#1A9850"),
     "UPF_perc_avg" = c("#1A9850", "#D73027"),
     NULL
   )  
@@ -490,7 +490,7 @@ volcano_plot <- function(data,comparison="diet"){
                              "Enriched in lower VS_total(-)"="#D73027")
     volcano_df <- data %>%
       dplyr::filter(str_starts(variable,"VS_total_minus"))
-  } else if (comparison=="pdi_an_avg"){
+  } else if (comparison=="pdi_avg"){
     color_coding_labels <- c("Insignificant",
                              "Enriched in higher PDI",
                              "Enriched in lower PDI")
@@ -498,8 +498,8 @@ volcano_plot <- function(data,comparison="diet"){
                              "Enriched in higher PDI"="#1A9850",
                              "Enriched in lower PDI"="#D73027")
     volcano_df <- data %>%
-      dplyr::filter(str_starts(variable,"pdi_an_avg"))
-  } else if (comparison=="hpdi_an_avg"){
+      dplyr::filter(str_starts(variable,"pdi_avg"))
+  } else if (comparison=="hpdi_avg"){
     color_coding_labels <- c("Insignificant",
                              "Enriched in higher hPDI",
                              "Enriched in lower hPDI")
@@ -507,8 +507,8 @@ volcano_plot <- function(data,comparison="diet"){
                              "Enriched in higher hPDI"="#1A9850",
                              "Enriched in lower hPDI"="#D73027")
     volcano_df <- data %>%
-      dplyr::filter(str_starts(variable,"hpdi_an_avg"))
-  } else if (comparison=="updi_an_avg"){
+      dplyr::filter(str_starts(variable,"hpdi_avg"))
+  } else if (comparison=="updi_avg"){
     color_coding_labels <- c("Insignificant",
                              "Enriched in higher uPDI",
                              "Enriched in lower uPDI")
@@ -516,7 +516,7 @@ volcano_plot <- function(data,comparison="diet"){
                              "Enriched in higher uPDI"="#D73027",
                              "Enriched in lower uPDI"="#1A9850")
     volcano_df <- data %>%
-      dplyr::filter(str_starts(variable,"updi_an_avg"))
+      dplyr::filter(str_starts(variable,"updi_avg"))
   } else if (comparison=="UPF_perc_avg"){
     color_coding_labels <- c("Insignificant",
                              "Enriched in higher UPF",
@@ -1432,15 +1432,15 @@ fit_glm <- function(metab,data,
   } else if (tested_variable=="VS_total_minus"){
     formula <- as.formula(paste0(
       "`", metab, "` ~ sex + bmi + age + vegan_duration + country*VS_total_minus"))
-  } else if (tested_variable=="pdi_an_avg"){
+  } else if (tested_variable=="pdi_avg"){
     formula <- as.formula(paste0(
-      "`", metab, "` ~ sex + bmi + age + vegan_duration + country*pdi_an_avg"))
-  } else if (tested_variable=="hpdi_an_avg"){
+      "`", metab, "` ~ sex + bmi + age + vegan_duration + country*pdi_avg"))
+  } else if (tested_variable=="hpdi_avg"){
     formula <- as.formula(paste0(
-      "`", metab, "` ~ sex + bmi + age + vegan_duration + country*hpdi_an_avg"))
-  } else if (tested_variable=="updi_an_avg"){
+      "`", metab, "` ~ sex + bmi + age + vegan_duration + country*hpdi_avg"))
+  } else if (tested_variable=="updi_avg"){
     formula <- as.formula(paste0(
-      "`", metab, "` ~ sex + bmi + age + vegan_duration + country*updi_an_avg"))
+      "`", metab, "` ~ sex + bmi + age + vegan_duration + country*updi_avg"))
   } else if (tested_variable=="UPF_perc_avg"){
     formula <- as.formula(paste0(
       "`", metab, "` ~ sex + bmi + age + vegan_duration + country*UPF_perc_avg"))

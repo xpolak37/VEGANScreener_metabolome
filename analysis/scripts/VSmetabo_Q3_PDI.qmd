@@ -75,13 +75,17 @@ pdi_df <- read.table(
   file = "../../data/preprocessed/dietary/pdi/pdi_avg_residuals_scaled_v3.tsv",
   check.names = FALSE,
   header = TRUE) %>% 
-  dplyr::select(study_id,pdi_an_avg,hpdi_an_avg,updi_an_avg) 
+  dplyr::select(study_id,pdi_avg,hpdi_avg,updi_avg) %>% 
+  dplyr::mutate(
+    pdi_avg = pdi_avg + 30,
+    hpdi_avg = hpdi_avg + 30,
+    updi_avg = updi_avg + 30)
 
 metadata_df <- merge(metadata_df,pdi_df,by = "study_id",all.x = TRUE)
 ```
 
 ```{r}
-metadata_df <- metadata_df %>% dplyr::filter(!is.na(pdi_an_avg))
+metadata_df <- metadata_df %>% dplyr::filter(!is.na(pdi_avg))
 nmr_df <- nmr_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
 lcms_df <- lcms_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
 spca_integrated_df <- spca_integrated_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
@@ -105,7 +109,7 @@ metadata_scaled_df <- metadata_scaled_df %>%
 Summary of counts per diet group, country and sex:
 
 ```{r}
-metadata_df %>% dplyr::group_by(country,sex) %>% count()
+metadata_df %>% dplyr::group_by(country,sex) %>% dplyr::count()
 ```
 
 Basic plots for visualizing the distribution of selected variables:
@@ -116,7 +120,7 @@ name <- c("Age (years)","BMI","Vegan diet duration (years)","VS_total","UPF [%]"
           "PDI")
 i <- 1
 for (col in c("age","bmi","vegan_duration","VS_total","UPF_perc_avg",
-              "pdi_an_avg")){
+              "pdi_avg")){
   p <- ggplot(metadata_df) + 
     geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
     theme_minimal() + 
@@ -141,7 +145,7 @@ for (col in c("sex","country","diet_supplements")){
     stat_count(aes(x=!!sym(col)),fill="darkblue") + 
     xlab(name[i]) +
   geom_text(data=metadata_df %>% 
-              dplyr::group_by(!!sym(col)) %>% count() %>%
+              dplyr::group_by(!!sym(col)) %>% dplyr::count() %>%
               dplyr::mutate(n=n+10), aes(x=!!sym(col),y=n,label=n))
   
   plot_list[[length(plot_list)+1]] <- p
@@ -171,7 +175,7 @@ spca_plot_df <- merge(
 
 p <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "pdi_an_avg",
+              color_col = "pdi_avg",
               perform_pca = FALSE)
 
 p <- ggtheme(p)
@@ -200,21 +204,21 @@ spca_plot_df <- merge(
 
 p1 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "pdi_an_avg",
+              color_col = "pdi_avg",
               perform_pca = FALSE,axis = c("PC1","PC2"))
 
 p1 <- ggtheme(p1)
 
 p2 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "pdi_an_avg",
+              color_col = "pdi_avg",
               perform_pca = FALSE,axis = c("PC2","PC3"))
 
 p2 <- ggtheme(p2)
 
 p3 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "pdi_an_avg",
+              color_col = "pdi_avg",
               perform_pca = FALSE,axis = c("PC1","PC3"))
 
 p3 <- ggtheme(p3)
@@ -240,7 +244,7 @@ spca_for_uni <- merge(spca_integrated_df %>% rownames_to_column("study_id"),
 
 spca_for_uni <- spca_for_uni %>%
   mutate(
-    tertile_cut = ntile(pdi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_cut = ntile(pdi_avg, 3), # assign 1, 2, or 3 (tertile)
     tertile_label = case_when(                          # label tertiles
       tertile_cut == 1 ~ "1st_PDItertile",
       tertile_cut == 2 ~ "2nd_PDItertile",
@@ -283,7 +287,7 @@ dev.off()
 ```{r}
 metadata_df <- metadata_df %>%
   mutate(
-    tertile_cut = ntile(pdi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_cut = ntile(pdi_avg, 3), # assign 1, 2, or 3 (tertile)
     tertile_label = case_when(                          # label tertiles
       tertile_cut == 1 ~ "1st_PDItertile",
       tertile_cut == 2 ~ "2nd_PDItertile",
@@ -325,9 +329,9 @@ dev.off()
 
 ```{r}
 metadata_df %>%
-  dplyr::select(pdi_an_avg, tertile_label) %>%
+  dplyr::select(pdi_avg, tertile_label) %>%
   group_by(tertile_label) %>%
-  summarise(mean_PDI = mean(pdi_an_avg, na.rm = TRUE))
+  summarise(mean_PDI = mean(pdi_avg, na.rm = TRUE))
 ```
 
 ## PERMANOVA
@@ -347,7 +351,7 @@ dist_mat <- vegdist(spca_integrated_df,
 
 # Test whether vegan vs omnivore differ in metabolomics
 adonis_result <- adonis2(
-  dist_mat ~ sex + bmi + age + vegan_duration + country*pdi_an_avg,
+  dist_mat ~ sex + bmi + age + vegan_duration + country*pdi_avg,
   data = metadata_scaled_df , 
   permutations = 999,
   by="terms")
@@ -357,7 +361,7 @@ print(adonis_result)
 
 ```{r,fig.width=6,fig.height=2}
 adonis_result <- adonis_result[-c(7,9),] %>% rownames_to_column("Var")
-adonis_result$Var <- factor(adonis_result$Var,levels = rev(c("sex","bmi","age", "vegan_duration","country","pdi_an_avg", "Residual")))
+adonis_result$Var <- factor(adonis_result$Var,levels = rev(c("sex","bmi","age", "vegan_duration","country","pdi_avg", "Residual")))
 p <- ggplot(adonis_result, aes(fill=Var, x=R2, y="Metabolome")) + 
     geom_bar(position="stack", stat="identity") + 
   ylab("") + xlab("Partial variance explained (R²)") + 
@@ -396,7 +400,7 @@ rf_model <- make_rf_model(data=prepared_df,
                             outcome="Group",
                             N = 500,
                            file = model_name,
-                            reuse=TRUE)
+                              reuse=TRUE)
 
 roc_c <- roc_curve(model_object = rf_model, 
                    group = c("low PDI","high PDI"),CI = TRUE) 
@@ -538,7 +542,7 @@ spca_plot_df <- merge(
 
 p <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "pdi_an_avg",
+              color_col = "pdi_avg",
               perform_pca = FALSE,
               axis = c("PC8","PC9"))
 
@@ -579,7 +583,7 @@ dev.off()
 Here, we will explore the loadings of the most important PC (**PC9**)
 
 ```{r,collapse=TRUE}
-load("../results/preprocessing/spca_result_vegans_INT_v2.RData")
+load("../results/preprocessing/spca_result_vegans_INT_v3.RData")
 df <- data.frame (
   Metabolite=names(spca_result$loadings$X[,5]),
   Loading=spca_result$loadings$X[,5])
@@ -618,7 +622,7 @@ concat_for_uni <- merge(concat_integrated_df %>% rownames_to_column("study_id"),
 
 concat_for_uni <- concat_for_uni %>%
   mutate(
-    tertile_cut = ntile(pdi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_cut = ntile(pdi_avg, 3), # assign 1, 2, or 3 (tertile)
     tertile_label = case_when(                          # label tertiles
       tertile_cut == 1 ~ "1st_PDItertile",
       tertile_cut == 2 ~ "2nd_PDItertile",
@@ -703,7 +707,7 @@ Metabolite ~ sex + bmi + age + eq_vegan_dur_total + Country*PDI
 ```{r}
 results_list <- lapply(colnames(concat_integrated_df), 
                        function(x) fit_glm(x,concat_for_uni,
-                                           tested_variable = "pdi_an_avg"))
+                                           tested_variable = "pdi_avg"))
 results_df <- do.call(rbind, results_list)
 
 results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
@@ -714,13 +718,13 @@ Look at significant results - **Propionylcarnitine**
 ```{r}
 results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="pdi_an_avg")
+  dplyr::filter(variable=="pdi_avg")
 
 ```
 
 ```{r}
 results_all <- (results_df %>%
-  dplyr::filter(variable=="pdi_an_avg"))
+  dplyr::filter(variable=="pdi_avg"))
 
 # save 
 write.table(results_all,"../results/vegan/Q3_PDI//lm_continous_all.tsv",
@@ -729,12 +733,12 @@ write.table(results_all,"../results/vegan/Q3_PDI//lm_continous_all.tsv",
             sep="\t")
 ```
 
-Check the interaction effect - **Carnitite,3-Hydroxybutyrate**
+Check the interaction effect - **Carnitite,3-Hydroxybutyrate, Propionylcarnitine,Glycerophosphocholine**
 
 ```{r}
 df <- results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(str_ends(variable, ":pdi_an_avg"))
+  dplyr::filter(str_ends(variable, ":pdi_avg"))
 
 df
 
@@ -744,13 +748,13 @@ pc_to_be_removed <- df$metabolite
 ```{r,collapse=TRUE}
 concat_significant_df <- (results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="pdi_an_avg"))
+  dplyr::filter(variable=="pdi_avg"))
 
 concat_univariate_results <- results_df
 
 concat_significant <- (results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="pdi_an_avg"))$metabolite
+  dplyr::filter(variable=="pdi_avg"))$metabolite
 
 # save and show
 write.table(concat_significant_df,"../results/vegan/Q3_PDI//lm_continous.tsv",
@@ -764,7 +768,7 @@ knitr::kable(concat_significant)
 **Volcano plot**
 
 ```{r}
-vp <- volcano_plot(results_df,comparison = "pdi_an_avg")
+vp <- volcano_plot(results_df,comparison = "pdi_avg")
 vp
 ```
 
@@ -773,13 +777,13 @@ vp
 ```{r}
 sign <- (results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="pdi_an_avg"))$metabolite
+  dplyr::filter(variable=="pdi_avg"))$metabolite
 
 ```
 
 ```{r,fig.height=5,fig.width=5}
 df_for_plot <- concat_integrated_df %>% dplyr::select(sign)
-corr_object <- cor(concat_for_uni$pdi_an_avg,df_for_plot)
+corr_object <- cor(concat_for_uni$pdi_avg,df_for_plot)
 corrplot::corrplot(corr_object,method = "number")
 ```
 
@@ -1054,7 +1058,7 @@ vars <- sign
 vars_safe <- paste0("`", vars, "`")
 
 # Create the formula
-fml <- as.formula(paste("hpdi_an_avg ~", paste(vars_safe, collapse = " + ")))
+fml <- as.formula(paste("hpdi_avg ~", paste(vars_safe, collapse = " + ")))
 
 final_df_veganindex <- data.frame()
 
@@ -1072,14 +1076,14 @@ for (i in 1:length(cv_splits)){
   
   # calculate correlation 
   cor_test <- cor.test(sub_df$VGindex,
-               sub_df$hpdi_an_avg,
+               sub_df$hpdi_avg,
                method = "spearman")
   cor_val <- cor_test$estimate
   if (cor_test$p.value >0.05) cor_val = 0
 
   # plot the result
   p <- ggplot(sub_df, 
-              aes_string(x = "VGindex", y = "hpdi_an_avg"),
+              aes_string(x = "VGindex", y = "hpdi_avg"),
               color="blue") +
        geom_point() + 
     geom_smooth(method = "lm") + 
@@ -1100,14 +1104,14 @@ mean(rhos)
 ```{r}
 # calculate correlation 
   cor_test <- cor.test(final_df_veganindex$VGindex,
-               final_df_veganindex$hpdi_an_avg,
+               final_df_veganindex$hpdi_avg,
                method = "spearman")
   cor_val <- cor_test$estimate
   if (cor_test$p.value >0.05) cor_val = 0
 
   # plot the result
   p <- ggplot(final_df_veganindex, 
-              aes_string(x = "VGindex", y = "hpdi_an_avg"),
+              aes_string(x = "VGindex", y = "hpdi_avg"),
               color="blue") +
        geom_point() + 
     geom_smooth(method = "lm") + 

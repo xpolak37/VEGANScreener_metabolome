@@ -63,7 +63,7 @@ pdi_df <- as.data.frame(fread(
 pdi_df <- pdi_df %>% dplyr::select(-c(PDI_animal_fat_avg,PDI_eggs_avg,PDI_fish_or_seafood_avg,PDI_meat_avg,PDI_dairy_avg))
 ```
 
-**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
+**Scaling** — when metadata columns are used as covariates, they need to be scaled so that each has a mean of 0 and a standard deviation of 1.
 
 ```{r}
 metadata_scaled_df <- metadata_df
@@ -131,7 +131,7 @@ dev.off()
 
 ## Univariate analysis
 
-The lm model is used to test the differences in countries, while adjusting for covariates:
+A linear model (lm) is used to test for differences between countries while adjusting for covariates:
 
 *PDI group* ~ sex + bmi + age + VS_total + vegan_duration + Country
     
@@ -200,105 +200,12 @@ p_pairwise_heatmap
 
 ### Network
 
-#### All edges (>0.3)
-
-**Edge list**
-
-```{r}
-edges <- country_effects %>%
-  filter(abs(emmean) > 0.3) %>%
-  dplyr::select(from = country, to = PDI_group, 
-         emmean = emmean) %>%
-  dplyr::mutate(from=as.character(from),
-         weight=abs(emmean))
-
-edges$from <- as.character(edges$from)
-edges$to   <- as.character(edges$to)
-```
-
-**Nodes table**
-
-```{r}
-library(igraph)
-library(ggraph)
-
-countries <- as.character(unique(edges$from))
-metabs <- as.character(unique(edges$to))
-
-nodes <- data.frame(
-  name = c(countries, metabs),
-  type = c(rep(TRUE, length(countries)), rep(FALSE, length(metabs))) # TRUE = country, FALSE = metabolite
-)
-```
-
-**Build igraph object**
-
-```{r}
-g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
-```
-
-**Visualize**
-
-```{r,fig.height=5,fig.width=8}
-country_colors <- c(
-  BE = "#FDDA24",  # gold
-  CZ = "#11457E",  # blue
-  DE = "#000000",  # black
-  ES = "#630356",  # purple
-  CH = "#D52B1E"   # red
-)
-
-# Assign colors to nodes: countries get their color, metabolites gray
-V(g)$color <- ifelse(V(g)$type,
-                     country_colors[V(g)$name],
-                     "gray70")
-
-library(stringr)
-V(g)$label <- V(g)$name |>
-  str_remove("^PDI_") |>
-  str_remove("_avg$") |>
-  str_replace_all("_", " ")
-
-overrides <- c(
-  "legume vegetarian prot a" = "legumes & vegetarian protein alternatives",
-  "sugar sweetened beverage" = "sugar-sweetened beverages"
-)
-
-V(g)$label <- ifelse(V(g)$label %in% names(overrides),
-                     overrides[V(g)$label],
-                     V(g)$label)
-
-set.seed(123)
- p <- ggraph(g, layout = "fr") +
-  geom_edge_link(aes(width = abs(weight), color = emmean > 0), alpha = 0.7) +
-  scale_edge_width_continuous(name = "EMM magnitude") +
-  scale_edge_color_manual(name = "EMM direction",
-                          values = c("lightblue", "lightpink"),
-                          labels = c("<0", ">0")) +
-  geom_node_point(aes(shape = type, color = name), size = 6) +
-  scale_color_manual(values = setNames(V(g)$color, V(g)$name)) +
-  scale_shape_manual(name = "Variable",
-                     values = c("FALSE" = 16, "TRUE" = 17),
-                     labels = c("FALSE" = "PDI group", "TRUE" = "Country")) +
-  geom_node_text(aes(label = label), repel = TRUE, size = 3,
-                 max.overlaps = Inf, box.padding = 0.6, point.padding = 0.4,
-                 min.segment.length = 1, segment.size = 0.2,
-                 segment.color = "grey60", seed = 123) +
-  coord_cartesian(clip = "off") +
-  theme_void() +
-  theme(plot.margin = margin(20, 60, 20, 60)) +
-  guides(color = "none")
-
-p
-```
-
 #### Significant edges (p_adj<0.1)
 
 **Edge list**
 
 ```{r}
 edges <- country_effects %>%
-  #filter(abs(emmean) > 0.1) %>%
   filter(p_adj<0.1) %>%
   dplyr::select(from = country, to = PDI_group, 
          emmean = emmean) %>%

@@ -557,7 +557,7 @@ dev.off()
 Here, we will explore the loadings of the most important PC (**PC5**)
 
 ```{r,collapse=TRUE}
-load("../results/preprocessing/spca_result_vegans_INT_v2.RData")
+load("../results/preprocessing/spca_result_vegans_INT_v3.RData")
 df <- data.frame (
   Metabolite=names(spca_result$loadings$X[,5]),
   Loading=spca_result$loadings$X[,5])
@@ -1066,22 +1066,33 @@ rhos <- rep(NA,5)
 
 # split the datasets for cross-validation
 concat_for_index <- concat_for_uni[sample(rownames(concat_for_uni)),]
+set.seed(123)
 cv_splits <- cv_folds(concat_for_index,folds = 5)
-
-# define formula - significant metabolites
-vars <- sign
-# Wrap all variable names in backticks
-vars_safe <- paste0("`", vars, "`")
-
-# Create the formula
-fml <- as.formula(paste("VS_total_minus ~", paste(vars_safe, collapse = " + ")))
 
 final_df_veganindex <- data.frame()
 
 # cross validation loop
+vars_selection <- list()
 for (i in 1:length(cv_splits)){
+  unisub_df <- concat_for_uni[cv_splits[[i]]$train,]
+  results_list <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_glm(x,unisub_df,
+                                           tested_variable = "VS_total_minus"))
+  results_df <- do.call(rbind, results_list)
+  
+  results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
+
+  vars <- results_df$metabolite[results_df$p_adjusted<0.05 & results_df$variable=="VS_total_minus"]
+  vars_selection[[i]] <- vars
+  
+  # Wrap all variable names in backticks
+  vars_safe <- paste0("`", vars, "`")
+  
+  fml <- as.formula(paste("VS_total_minus ~", paste(vars_safe, collapse = " + ")))
+  
   # fit the model
-  model <- lm(fml, data = concat_for_uni[cv_splits[[i]]$train,])
+  model <- lm(fml, unisub_df)
+  
   # predict the result on validation dataset
   VG_index <- stats::predict(model,concat_for_uni[cv_splits[[i]]$val,])
   
@@ -1099,9 +1110,10 @@ for (i in 1:length(cv_splits)){
 
   # plot the result
   p <- ggplot(sub_df, 
-              aes_string(x = "VGindex", y = "VS_total_minus")) +
+              aes_string(x = "VGindex", y = "VS_total_minus"),
+              color="blue") +
        geom_point() + 
-    geom_smooth(method = "lm",color="blue") + 
+    geom_smooth(method = "lm") + 
     theme_minimal() + 
     ggtitle(paste("Rho =",round(cor_val,2)))
 
@@ -1119,6 +1131,7 @@ wrap_plots(plot_list)
 ```{r}
 mean(rhos)
 ```
+
 
 ```{r}
 # calculate correlation 

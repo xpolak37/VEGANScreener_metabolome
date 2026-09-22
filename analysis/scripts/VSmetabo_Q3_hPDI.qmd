@@ -29,24 +29,24 @@ project:
 fontsize: 12 px
 ---
 
-**This code is used to explore patterns in the metabolome profiles of vegans, particularly by linking them to the PDI score**
+**This script explores patterns in the metabolome profiles of vegans, particularly by linking them to the PDI score.**
 
 
-The script is divided into two parts, according to the integration method of metabolome datasets (see preprocessing scripts for details). At first, the **sPCA dataset** is analyzed. This dataset is used for multivariate analysis, PCA visualization, PERMANOVA and ML approach. The **concatenated dataset** of both LCMS and NMR is used for univariate analysis. 
+The script is divided into two parts, based on how the metabolome datasets were integrated (see the preprocessing scripts for details). The first part analyzes the **sPCA dataset**, which is used for multivariate analysis, PCA visualization, PERMANOVA, and the machine-learning models. The second part uses the **concatenated dataset** (LC-MS and NMR combined) for the univariate analysis. 
 
-The main parts of the analysis is composed of:
+The analysis is composed of the following main parts:
 
-1.  Global visualization - 3 components color-coding **hPDI**
+1.  Global visualization — the first three components, color-coded by **hPDI**.
 
-2.  PERMANOVA - how much of the variation can be explained by various external variables:
+2.  PERMANOVA — how much of the variation can be explained by various external variables:
   dist(Metabolome) \~ sex + bmi + age + veganDuration + country***hPDI**
 
-3.  Univariate analysis (feature-wise model) - linear modelling of metabolite using various external variables:
+3.  Univariate analysis (feature-wise model) — linear modelling of each metabolite against various external variables:
   Metabolite \~  sex + bmi + age + veganDuration + Country***hPDI**
   
-4.  Random fores (RF) classification - the model is trained and validated through bootstrapping with 500 iterations. The RF model is used to distinguish between participants with **1st and 3rd tercile of hPDI**. The two types of models are trained:
-a) ML model on original sPCA dataset
-b) ML model on sPCA dataset after regressing out the covariates.
+4.  Random forest (RF) classification — the model is trained and validated by bootstrapping with 500 iterations, and used to distinguish between participants in the **1st and 3rd tertiles of hPDI**. Two types of models are trained:
+a) a model on the original sPCA dataset
+b) a model on the sPCA dataset after regressing out the covariates.
 
 ```{r,echo=FALSE}
 source("custom_functions_vegans.R")
@@ -75,20 +75,24 @@ pdi_df <- read.table(
   file = "../../data/preprocessed/dietary/pdi/pdi_avg_residuals_scaled_v3.tsv",
   check.names = FALSE,
   header = TRUE) %>% 
-  dplyr::select(study_id,pdi_an_avg,hpdi_an_avg,updi_an_avg) 
+  dplyr::select(study_id,pdi_avg,hpdi_avg,updi_avg) %>% 
+  dplyr::mutate(
+    pdi_avg = pdi_avg + 30,
+    hpdi_avg = hpdi_avg + 30,
+    updi_avg = updi_avg + 30)
 
 metadata_df <- merge(metadata_df,pdi_df,by = "study_id",all.x = TRUE)
 ```
 
 ```{r}
-metadata_df <- metadata_df %>% dplyr::filter(!is.na(hpdi_an_avg))
+metadata_df <- metadata_df %>% dplyr::filter(!is.na(hpdi_avg))
 nmr_df <- nmr_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
 lcms_df <- lcms_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
 spca_integrated_df <- spca_integrated_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
 ```
 
 
-**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
+**Scaling** — when metadata columns are used as covariates, they need to be scaled so that each has a mean of 0 and a standard deviation of 1.
 
 ```{r}
 metadata_scaled_df <- metadata_df
@@ -102,13 +106,13 @@ metadata_scaled_df <- metadata_scaled_df %>%
 
 # Descriptive statistics
 
-Summary of counts per diet group, country and sex:
+Summary of participant counts by diet group, country, and sex:
 
 ```{r}
-metadata_df %>% dplyr::group_by(country,sex) %>% count()
+metadata_df %>% dplyr::group_by(country,sex) %>% dplyr::count()
 ```
 
-Basic plots for visualizing the distribution of selected variables:
+Basic plots showing the distribution of selected variables:
 
 ```{r,fig.width=15,fig.height=10,warning=FALSE}
 plot_list <- list()
@@ -116,7 +120,7 @@ name <- c("Age (years)","BMI","Vegan diet duration (years)","VS_total","UPF [%]"
           "hPDI")
 i <- 1
 for (col in c("age","bmi","vegan_duration","VS_total","UPF_perc_avg",
-              "hpdi_an_avg")){
+              "hpdi_avg")){
   p <- ggplot(metadata_df) + 
     geom_histogram(aes(x=!!sym(col)),fill="darkblue") + 
     theme_minimal() + 
@@ -141,7 +145,7 @@ for (col in c("sex","country","diet_supplements")){
     stat_count(aes(x=!!sym(col)),fill="darkblue") + 
     xlab(name[i]) +
   geom_text(data=metadata_df %>% 
-              dplyr::group_by(!!sym(col)) %>% count() %>%
+              dplyr::group_by(!!sym(col)) %>% dplyr::count() %>%
               dplyr::mutate(n=n+10), aes(x=!!sym(col),y=n,label=n))
   
   plot_list[[length(plot_list)+1]] <- p
@@ -155,27 +159,12 @@ wrap_plots(plot_list)
 
 # SPCA
 
-The SPCA dataset was created by concatenating LCMS and NMR dataset and applying Mixomics::spca() function. See preprocessing script for details. 
+The sPCA dataset was created by concatenating the LC-MS and NMR datasets and applying the mixOmics::spca() function. See the preprocessing script for details. 
 
-mixOmics::spca() performs **Sparse Principal Component Analysis**, which is similar to  regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
-This sparsity is controlled by penalization, making interpretation easier because irrelevant or noisy variables get loadings of zero.
+mixOmics::spca() performs **sparse Principal Component Analysis (sPCA)**, which works like regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
+The degree of sparsity is controlled by a penalization term, which makes the components easier to interpret because irrelevant or noisy variables are given loadings of zero.
 
 ## Visualization
-
-### UMAP
-
-```{r}
-p <- umap_plot(spca_integrated_df,metadata_df,color_col = "hpdi_an_avg",
-          neighbors = 40,min_dist = 0.2)
-
-p
-```
-
-```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q3_hPDI/umap.pdf",height = 4,width = 6)
-p
-dev.off()
-```
 
 ### PCA
 
@@ -186,7 +175,7 @@ spca_plot_df <- merge(
 
 p <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "hpdi_an_avg",
+              color_col = "hpdi_avg",
               perform_pca = FALSE)
 
 p <- ggtheme(p)
@@ -210,21 +199,21 @@ spca_plot_df <- merge(
 
 p1 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "hpdi_an_avg",
+              color_col = "hpdi_avg",
               perform_pca = FALSE,axis = c("PC1","PC2"))
 
 p1 <- ggtheme(p1)
 
 p2 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "hpdi_an_avg",
+              color_col = "hpdi_avg",
               perform_pca = FALSE,axis = c("PC2","PC3"))
 
 p2 <- ggtheme(p2)
 
 p3 <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "hpdi_an_avg",
+              color_col = "hpdi_avg",
               perform_pca = FALSE,axis = c("PC1","PC3"))
 
 p3 <- ggtheme(p3)
@@ -250,7 +239,7 @@ spca_for_uni <- merge(spca_integrated_df %>% rownames_to_column("study_id"),
 
 spca_for_uni <- spca_for_uni %>%
   mutate(
-    tertile_cut = ntile(hpdi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_cut = ntile(hpdi_avg, 3), # assign 1, 2, or 3 (tertile)
     tertile_label = case_when(                          # label tertiles
       tertile_cut == 1 ~ "1st_hPDItertile",
       tertile_cut == 2 ~ "2nd_hPDItertile",
@@ -293,7 +282,7 @@ dev.off()
 ```{r}
 metadata_df <- metadata_df %>%
   mutate(
-    tertile_cut = ntile(hpdi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_cut = ntile(hpdi_avg, 3), # assign 1, 2, or 3 (tertile)
     tertile_label = case_when(                          # label tertiles
       tertile_cut == 1 ~ "1st_hPDItertile",
       tertile_cut == 2 ~ "2nd_hPDItertile",
@@ -335,20 +324,20 @@ dev.off()
 
 ```{r}
 metadata_df %>%
-  dplyr::select(hpdi_an_avg, tertile_label) %>%
+  dplyr::select(hpdi_avg, tertile_label) %>%
   group_by(tertile_label) %>%
-  summarise(mean_hPDI = mean(hpdi_an_avg, na.rm = TRUE))
+  summarise(mean_hPDI = mean(hpdi_avg, na.rm = TRUE))
 ```
 
 ## PERMANOVA
 
-The test show how much of the variation in metabolomics is explained by: sex - age - bmi -vegan duration - Country - **PDI**
+The test shows how much of the variation in the metabolome is explained by sex, age, BMI, vegan duration, country, and **hPDI**.
 
-Variables were added sequentially (Type I SS), so each p-value and R² reflects a partial effect, after adjusting for those above. This model accounts for variation due to sex, age, vegan diet duration, BMI and country of origin. Then accounts for the main effects of PDI. Then tests whether the effect of PDI varies by country of origin (interaction).
+Variables were added sequentially (Type I sums of squares), so each p-value and R² reflects a partial effect after adjusting for the variables above it. The model first accounts for variation due to sex, age, vegan diet duration, BMI, and country of origin. It then accounts for the main effect of PDI, and finally tests whether the effect of PDI varies by country of origin (the interaction term).
 
 ----------------------
 
-PDI explains **1.873** of variation after adjusting for sex, age, bmi,country and duration of the diet. This result is statistically *significant* (p=0.001).
+PDI explains **1.873%** of the variation after adjusting for sex, age, BMI, country, and diet duration. This result is statistically significant (p=0.001).
 
 ```{r}
 # Create Euclidean distance matrix
@@ -357,7 +346,7 @@ dist_mat <- vegdist(spca_integrated_df,
 
 # Test whether vegan vs omnivore differ in metabolomics
 adonis_result <- adonis2(
-  dist_mat ~ sex + bmi + age + vegan_duration + country*hpdi_an_avg,
+  dist_mat ~ sex + bmi + age + vegan_duration + country*hpdi_avg,
   data = metadata_scaled_df , 
   permutations = 999,
   by="terms")
@@ -367,7 +356,7 @@ print(adonis_result)
 
 ```{r,fig.width=6,fig.height=2}
 adonis_result <- adonis_result[-c(7,9),] %>% rownames_to_column("Var")
-adonis_result$Var <- factor(adonis_result$Var,levels = rev(c("sex","bmi","age", "vegan_duration","country","hpdi_an_avg", "Residual")))
+adonis_result$Var <- factor(adonis_result$Var,levels = rev(c("sex","bmi","age", "vegan_duration","country","hpdi_avg", "Residual")))
 p <- ggplot(adonis_result, aes(fill=Var, x=R2, y="Metabolome")) + 
     geom_bar(position="stack", stat="identity") + 
   ylab("") + xlab("Partial variance explained (R²)") + 
@@ -382,6 +371,7 @@ p
 p_pca[[2]] <- p
 p_pca[[3]] <- adonis_result
 ```
+
 ## RF model
 
 ### Original model
@@ -499,7 +489,7 @@ save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_mode
 
 ### Original model
 
-**PC5** is **PC10** the most important for RF model.
+**PC5** and **PC10** are the most important variables for the RF model.
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/hPDI_tertile_vegan/rf_model.RData")
@@ -516,7 +506,7 @@ ggplot(var_imp) +
 
 ### Adjusted model
 
-The most important is **PC5** and **PC1**.
+The most important variables are **PC5** and **PC1**.
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/adjusted_hpdi_model_vegan/rf_model.RData")
@@ -533,7 +523,7 @@ ggplot(var_imp) +
 
 ### Visualization
 
-To explore the important PCs, their visualization is shown below. We will show **PC1** and **PC5** as these PCs were picked by original or adjusted models. However, as the performance of the  model was poor, the visualization is rather reduntant. 
+To explore the important PCs, their visualizations are shown below. We show **PC1** and **PC5**, which were selected by the original or the adjusted model. However, since the model's performance was poor, these visualizations are rather redundant. 
 
 
 ```{r,fig.width=8,fig.height=6}
@@ -543,7 +533,7 @@ spca_plot_df <- merge(
 
 p <- pca_plot(spca_integrated_df,
               metadata_df,
-              color_col = "hpdi_an_avg",
+              color_col = "hpdi_avg",
               perform_pca = FALSE,
               axis = c("PC1","PC5"))
 
@@ -571,7 +561,7 @@ concat_for_uni <- merge(concat_integrated_df %>% rownames_to_column("study_id"),
 
 concat_for_uni <- concat_for_uni %>%
   mutate(
-    tertile_cut = ntile(hpdi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_cut = ntile(hpdi_avg, 3), # assign 1, 2, or 3 (tertile)
     tertile_label = case_when(                          # label tertiles
       tertile_cut == 1 ~ "1st_hPDItertile",
       tertile_cut == 2 ~ "2nd_hPDItertile",
@@ -620,7 +610,7 @@ VS_colors <- c("1st_hPDItertile"="#D73027",
 
 metadata_df <- metadata_df %>%
   mutate(
-    tertile_cut = ntile(hpdi_an_avg, 3), # assign 1, 2, or 3 (tertile)
+    tertile_cut = ntile(hpdi_avg, 3), # assign 1, 2, or 3 (tertile)
     tertile_label = case_when(                          # label tertiles
       tertile_cut == 1 ~ "1st_hPDItertile",
       tertile_cut == 2 ~ "2nd_hPDItertile",
@@ -656,34 +646,35 @@ dev.off()
 
 ## Univariate analysis
 
-We will test the differences between diets and VS total using generalize linear model while adjusting for covariates.
+We test the differences between diets and hPDI using a generalized linear model, while adjusting for covariates.
 
-### Countinuous analysis
+### Continuous analysis
 
-Call glm to explore which metabolites are significantly related to VS score while adjusting for age, sex, Country and dietary group:
+A GLM is used to identify which metabolites are significantly related to the hPDI score, adjusting for age, sex, country, and dietary group:
 
 Metabolite ~ sex + bmi + age + eq_vegan_dur_total + Country*hPDI
 
 ```{r}
 results_list <- lapply(colnames(concat_integrated_df), 
                        function(x) fit_glm(x,concat_for_uni,
-                                           tested_variable = "hpdi_an_avg"))
+                                           tested_variable = "hpdi_avg"))
 results_df <- do.call(rbind, results_list)
 
 results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
 ```
 
-Look at significant results - **10 metabolites**
+Significant results — **12 metabolites**:
 
 ```{r}
 results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="hpdi_an_avg")
+  dplyr::filter(variable=="hpdi_avg")
 
 ```
+
 ```{r}
 results_all <- (results_df %>%
-  dplyr::filter(variable=="hpdi_an_avg"))
+  dplyr::filter(variable=="hpdi_avg"))
 
 # save 
 write.table(results_all,"../results/vegan/Q3_hPDI//lm_continous_all.tsv",
@@ -692,12 +683,12 @@ write.table(results_all,"../results/vegan/Q3_hPDI//lm_continous_all.tsv",
             sep="\t")
 ```
 
-Check the interaction effect - **SM.d34.1., Phenylbutyrylglutamine, Tyrosine**
+Interaction effect — **PC.32.1., SM.d34.1., Phenylbutyrylglutamine, Diaminonaphthalene**:
 
 ```{r}
 df <- results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(str_ends(variable, ":hpdi_an_avg"))
+  dplyr::filter(str_ends(variable, ":hpdi_avg"))
 
 df
 
@@ -707,13 +698,13 @@ pc_to_be_removed <- df$metabolite
 ```{r,collapse=TRUE}
 concat_significant_df <- (results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="hpdi_an_avg"))
+  dplyr::filter(variable=="hpdi_avg"))
 
 concat_univariate_results <- results_df
 
 concat_significant <- (results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="hpdi_an_avg"))$metabolite
+  dplyr::filter(variable=="hpdi_avg"))$metabolite
 
 # save and show
 write.table(concat_significant_df,"../results/vegan/Q3_hPDI//lm_continous.tsv",
@@ -727,7 +718,7 @@ knitr::kable(concat_significant)
 **Volcano plot**
 
 ```{r}
-vp <- volcano_plot(results_df,comparison = "hpdi_an_avg")
+vp <- volcano_plot(results_df,comparison = "hpdi_avg")
 vp
 ```
 
@@ -736,13 +727,13 @@ vp
 ```{r}
 sign <- (results_df %>%
   dplyr::filter(p_adjusted<0.05) %>%
-  dplyr::filter(variable=="hpdi_an_avg"))$metabolite
+  dplyr::filter(variable=="hpdi_avg"))$metabolite
 
 ```
 
 ```{r,fig.height=5,fig.width=5}
 df_for_plot <- concat_integrated_df %>% dplyr::select(sign)
-corr_object <- cor(concat_for_uni$hpdi_an_avg,df_for_plot)
+corr_object <- cor(concat_for_uni$hpdi_avg,df_for_plot)
 corrplot::corrplot(corr_object,method = "number")
 ```
 
@@ -973,7 +964,7 @@ final_significance
 
 ## Continuous univariate test
 
-To create a vegan index based on concatenated dataset, we will use linear regression in order to get coefficients on significant variables that were revealed across the analysis:
+To build a vegan index from the concatenated dataset, we use linear regression to obtain coefficients for the significant variables identified across the analysis:
 
 ```{r}
 final_significance
@@ -986,24 +977,36 @@ sign <- final_significance
 plot_list <- list()
 rhos <- rep(NA,5)
 ps <- rep(NA,5)
+
 # split the datasets for cross-validation
 concat_for_index <- concat_for_uni[sample(rownames(concat_for_uni)),]
+set.seed(123)
 cv_splits <- cv_folds(concat_for_index,folds = 5)
-
-# define formula - significant metabolites
-vars <- sign
-# Wrap all variable names in backticks
-vars_safe <- paste0("`", vars, "`")
-
-# Create the formula
-fml <- as.formula(paste("hpdi_an_avg ~", paste(vars_safe, collapse = " + ")))
 
 final_df_veganindex <- data.frame()
 
 # cross validation loop
+vars_selection <- list()
 for (i in 1:length(cv_splits)){
+  unisub_df <- concat_for_uni[cv_splits[[i]]$train,]
+  results_list <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_glm(x,unisub_df,
+                                           tested_variable = "hpdi_avg"))
+  results_df <- do.call(rbind, results_list)
+  
+  results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
+
+  vars <- results_df$metabolite[results_df$p_adjusted<0.05 & results_df$variable=="hpdi_avg"]
+  vars_selection[[i]] <- vars
+  
+  # Wrap all variable names in backticks
+  vars_safe <- paste0("`", vars, "`")
+  
+  fml <- as.formula(paste("hpdi_avg ~", paste(vars_safe, collapse = " + ")))
+  
   # fit the model
-  model <- lm(fml, data = concat_for_uni[cv_splits[[i]]$train,])
+  model <- lm(fml, unisub_df)
+  
   # predict the result on validation dataset
   VG_index <- stats::predict(model,concat_for_uni[cv_splits[[i]]$val,])
   
@@ -1014,14 +1017,14 @@ for (i in 1:length(cv_splits)){
   
   # calculate correlation 
   cor_test <- cor.test(sub_df$VGindex,
-               sub_df$hpdi_an_avg,
+               sub_df$hpdi_avg,
                method = "spearman")
   cor_val <- cor_test$estimate
   if (cor_test$p.value >0.05) cor_val = 0
 
   # plot the result
   p <- ggplot(sub_df, 
-              aes_string(x = "VGindex", y = "hpdi_an_avg"),
+              aes_string(x = "VGindex", y = "hpdi_avg"),
               color="blue") +
        geom_point() + 
     geom_smooth(method = "lm") + 
@@ -1043,20 +1046,20 @@ mean(rhos)
 # Fisher's method to combine p-values
 library(metap)
 combined_p <- sumlog(ps)$p
-c
+combined_p
 ```
 
 ```{r}
 # calculate correlation 
   cor_test <- cor.test(final_df_veganindex$VGindex,
-               final_df_veganindex$hpdi_an_avg,
+               final_df_veganindex$hpdi_avg,
                method = "spearman")
   cor_val <- cor_test$estimate
   if (cor_test$p.value >0.05) cor_val = 0
 
   # plot the result
   p <- ggplot(final_df_veganindex, 
-              aes_string(x = "VGindex", y = "hpdi_an_avg"),
+              aes_string(x = "VGindex", y = "hpdi_avg"),
               color="blue") +
        geom_point() + 
     geom_smooth(method = "lm") + 

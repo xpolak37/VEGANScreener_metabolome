@@ -29,24 +29,24 @@ project:
 fontsize: 12 px
 ---
 
-**This code is used to explore patterns in the metabolome profiles of vegans, particularly by linking them to the percentage of UPF**
+**This script explores patterns in the metabolome profiles of vegans, particularly by linking them to the percentage of UPF.**
 
 
-The script is divided into two parts, according to the integration method of metabolome datasets (see preprocessing scripts for details). At first, the **sPCA dataset** is analyzed. This dataset is used for multivariate analysis, PCA visualization, PERMANOVA and ML approach. The **concatenated dataset** of both LCMS and NMR is used for univariate analysis. 
+The script is divided into two parts, based on how the metabolome datasets were integrated (see the preprocessing scripts for details). The first part analyzes the **sPCA dataset**, which is used for multivariate analysis, PCA visualization, PERMANOVA, and the machine-learning models. The second part uses the **concatenated dataset** (LC-MS and NMR combined) for the univariate analysis. 
 
-The main parts of the analysis is composed of:
+The analysis is composed of the following main parts:
 
-1.  Global visualization - 3 components color-coding **UPF**
+1.  Global visualization — the first three components, color-coded by **UPF**.
 
-2.  PERMANOVA - how much of the variation can be explained by various external variables:
+2.  PERMANOVA — how much of the variation can be explained by various external variables:
   dist(Metabolome) \~ sex + bmi + age + veganDuration + country***UPF**
 
-3.  Univariate analysis (feature-wise model) - linear modelling of metabolite using various external variables:
+3.  Univariate analysis (feature-wise model) — linear modelling of each metabolite against various external variables:
   Metabolite \~  sex + bmi + age + veganDuration + Country***UPF**
   
-4.  Random fores (RF) classification - the model is trained and validated through bootstrapping with 500 iterations. The RF model is used to distinguish between participants with **1st and 3rd tercile of UPF**. The two types of models are trained:
-a) ML model on original sPCA dataset
-b) ML model on sPCA dataset after regressing out the covariates.
+4.  Random forest (RF) classification — the model is trained and validated by bootstrapping with 500 iterations, and used to distinguish between participants in the **1st and 3rd tertiles of UPF**. Two types of models are trained:
+a) a model on the original sPCA dataset
+b) a model on the sPCA dataset after regressing out the covariates.
 
 ```{r,echo=FALSE}
 source("custom_functions_vegans.R")
@@ -87,7 +87,7 @@ lcms_df <- lcms_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
 spca_integrated_df <- spca_integrated_df %>% dplyr::filter(rownames(.) %in% metadata_df$study_id)
 ```
 
-**Scaling** - when using columns from metadata as covariates, they need to be scaled, so mean is 0 and SD is 0.
+**Scaling** — when metadata columns are used as covariates, they need to be scaled so that each has a mean of 0 and a standard deviation of 1.
 
 ```{r}
 metadata_scaled_df <- metadata_df
@@ -101,13 +101,13 @@ metadata_scaled_df <- metadata_scaled_df %>%
 
 # Descriptive statistics
 
-Summary of counts per diet group, country and sex:
+Summary of participant counts by diet group, country, and sex:
 
 ```{r}
 metadata_df %>% dplyr::group_by(country,sex) %>% count()
 ```
 
-Basic plots for visualizing the distribution of selected variables:
+Basic plots showing the distribution of selected variables:
 
 ```{r,fig.width=15,fig.height=10,warning=FALSE}
 plot_list <- list()
@@ -152,10 +152,10 @@ wrap_plots(plot_list)
 
 # SPCA
 
-The SPCA dataset was created by concatenating LCMS and NMR dataset and applying Mixomics::spca() function. See preprocessing script for details. 
+The sPCA dataset was created by concatenating the LC-MS and NMR datasets and applying the mixOmics::spca() function. See the preprocessing script for details. 
 
-mixOmics::spca() performs **Sparse Principal Component Analysis**, which is similar to  regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
-This sparsity is controlled by penalization, making interpretation easier because irrelevant or noisy variables get loadings of zero.
+mixOmics::spca() performs **sparse Principal Component Analysis (sPCA)**, which works like regular PCA but adds a sparsity constraint so that only a subset of variables contributes to each component.
+The degree of sparsity is controlled by a penalization term, which makes the components easier to interpret because irrelevant or noisy variables are given loadings of zero.
 
 ## Visualization
 
@@ -180,7 +180,7 @@ p_pca[[1]] <- p
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/PCA.pdf",height = 4,width = 6)
+pdf("../results/vegan/Q4_UPF/PCA.pdf",height = 4,width = 6)
 p
 dev.off()
 ```
@@ -216,7 +216,7 @@ plot_layout(guides = "collect")
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/PCA_all.pdf",height = 4,width = 15)
+pdf("../results/vegan/Q4_UPF/PCA_all.pdf",height = 4,width = 15)
 p1 + p2 + p3 + 
 plot_layout(guides = "collect")
 dev.off()
@@ -264,7 +264,7 @@ a
 ```
 
 ```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/pca_boxplots.pdf",height = 15,width = 20)
+pdf("../results/vegan/Q4_UPF/pca_boxplots.pdf",height = 15,width = 20)
 a
 dev.off()
 ```
@@ -308,7 +308,7 @@ p
 ```
 
 ```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/pca_heatmap.pdf",height = 10,width = 10)
+pdf("../results/vegan/Q4_UPF/pca_heatmap.pdf",height = 10,width = 10)
 p
 dev.off()
 ```
@@ -324,13 +324,13 @@ metadata_df %>%
 
 ## PERMANOVA
 
-The test show how much of the variation in metabolomics is explained by: sex - age - bmi -vegan duration - Country - **UPF**
+The test shows how much of the variation in the metabolome is explained by sex, age, BMI, vegan duration, country, and **UPF**.
 
-Variables were added sequentially (Type I SS), so each p-value and R² reflects a partial effect, after adjusting for those above. This model accounts for variation due to sex, age, vegan diet duration, BMI and country of origin. Then accounts for the main effects of UPF Then tests whether the effect of UPF varies by country of origin (interaction).
+Variables were added sequentially (Type I sums of squares), so each p-value and R² reflects a partial effect after adjusting for the variables above it. The model first accounts for variation due to sex, age, vegan diet duration, BMI, and country of origin. It then accounts for the main effect of UPF, and finally tests whether the effect of UPF varies by country of origin (the interaction term).
 
 ----------------------
 
-UPF explains **1.465%** of variation after adjusting for sex, age, bmi,country and duration of the diet. This result is statistically *significant* (p<0.001).
+UPF explains **1.465%** of the variation after adjusting for sex, age, BMI, country, and diet duration. This result is statistically significant (p<0.001).
 
 ```{r}
 # Create Euclidean distance matrix
@@ -400,7 +400,7 @@ roc_c
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/orig_rf_upf.pdf",width = 6,height = 5)
+pdf("../results/vegan/Q4_UPF/orig_rf_upf.pdf",width = 6,height = 5)
 roc_c
 dev.off()
 ```
@@ -461,7 +461,7 @@ save(rf_upf,file="../results/vegan/figures/rf_upf.RData")
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/adjusted_rf_UPF.pdf",width = 6,height = 5)
+pdf("../results/vegan/Q4_UPF/adjusted_rf_UPF.pdf",width = 6,height = 5)
 roc_c
 dev.off()
 ```
@@ -486,7 +486,7 @@ save_rf_details("../results/vegan/RF_models_performance.xlsx",model_name,rf_mode
 
 ### Original model
 
-**PC10** and **PC3** are the most important for RF model.
+**PC10** and **PC3** are the most important variables for the RF model.
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/UPF_tertile_vegan/rf_model.RData")
@@ -503,7 +503,7 @@ ggplot(var_imp) +
 
 ### Adjusted model
 
-The most important is **PC20** - inconsistent results with above. 
+The most important variable is **PC20**, which is inconsistent with the results above. 
 
 ```{r,fig.width=10}
 load("../intermediate_files/models/adjusted_upf_model_vegan/rf_model.RData")
@@ -520,7 +520,7 @@ ggplot(var_imp) +
 
 ### Visualization
 
-To explore the important PCs, their visualization is shown below. We will show **PC10** and **PC20** as these PCs were picked by original or adjusted models. However, as the performance of the  model was poor, the visualization is rather reduntant. 
+To explore the important PCs, their visualizations are shown below. We show **PC10** and **PC20**, which were selected by the original or the adjusted model. However, since the model's performance was poor, these visualizations are rather redundant. 
 
 
 ```{r,fig.width=4,fig.height=3}
@@ -560,7 +560,7 @@ p
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/important_pca_boxplots.pdf",height = 4,width = 8)
+pdf("../results/vegan/Q4_UPF/important_pca_boxplots.pdf",height = 4,width = 8)
 p
 dev.off()
 ```
@@ -616,7 +616,7 @@ a
 ```
 
 ```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/concat_boxplots.pdf",height = 35,width = 20)
+pdf("../results/vegan/Q4_UPF/concat_boxplots.pdf",height = 35,width = 20)
 a
 dev.off()
 ```
@@ -647,7 +647,7 @@ p
 ```
 
 ```{r,eval=TRUE,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/concat_heatmap.pdf",height = 10,width = 10)
+pdf("../results/vegan/Q4_UPF/concat_heatmap.pdf",height = 10,width = 10)
 p
 dev.off()
 ```
@@ -655,11 +655,11 @@ dev.off()
 
 ## Univariate analysis
 
-We will test the differences between diets and VS total using generalize linear model while adjusting for covariates.
+We test the differences between diets and UPF using a generalized linear model, while adjusting for covariates.
 
 ### Continuous analysis
 
-Call glm to explore which metabolites are significantly related to VS score while adjusting for age, sex, Country and dietary group:
+A GLM is used to identify which metabolites are significantly related to UPF, adjusting for age, sex, country, and dietary group:
 
 Metabolite ~ sex + bmi + age + eq_vegan_dur_total + Country*UPF
 
@@ -672,7 +672,7 @@ results_df <- do.call(rbind, results_list)
 results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
 ```
 
-Look at significant results - **Indoleacrylic acid**, **Octenoylcarnitine**, **Ergothionenine**
+Significant results — **Indoleacrylic acid**, **Octenoylcarnitine**, **Ergothionenine**:
 
 
 ```{r}
@@ -687,13 +687,13 @@ results_all <- (results_df %>%
   dplyr::filter(variable=="UPF_perc_avg"))
 
 # save 
-write.table(results_all,"../results/vegan/Q3b_UPF/lm_continous_all.tsv",
+write.table(results_all,"../results/vegan/Q4_UPF/lm_continous_all.tsv",
             row.names = FALSE,
             quote=FALSE,
             sep="\t")
 ```
 
-Check the interaction effect - **Hexanoylcarnitine**, **Valine**
+Interaction effect — **Hexanoylcarnitine**, **Valine**:
 
 ```{r}
 df <- results_df %>%
@@ -717,7 +717,7 @@ concat_significant <- (results_df %>%
   dplyr::filter(variable=="UPF_perc_avg"))$metabolite
 
 # save and show
-write.table(concat_significant_df,"../results/vegan/Q3b_UPF/lm_continous.tsv",
+write.table(concat_significant_df,"../results/vegan/Q4_UPF/lm_continous.tsv",
             row.names = FALSE,
             quote=FALSE,
             sep="\t")
@@ -977,7 +977,7 @@ final_significance
 
 ## Continuous univariate test
 
-To create a vegan index based on concatenated dataset, we will use linear regression in order to get coefficients on significant variables that were revealed across the analysis:
+To build a vegan index from the concatenated dataset, we use linear regression to obtain coefficients for the significant variables identified across the analysis:
 
 ```{r}
 sign <- final_significance
@@ -989,25 +989,37 @@ sign
 # define the variables
 plot_list <- list()
 rhos <- rep(NA,5)
+ps <- rep(NA,5)
 
 # split the datasets for cross-validation
 concat_for_index <- concat_for_uni[sample(rownames(concat_for_uni)),]
+set.seed(123)
 cv_splits <- cv_folds(concat_for_index,folds = 5)
-
-# define formula - significant metabolites
-vars <- sign
-# Wrap all variable names in backticks
-vars_safe <- paste0("`", vars, "`")
-
-# Create the formula
-fml <- as.formula(paste("UPF_perc_avg ~", paste(vars_safe, collapse = " + ")))
 
 final_df_veganindex <- data.frame()
 
 # cross validation loop
+vars_selection <- list()
 for (i in 1:length(cv_splits)){
+  unisub_df <- concat_for_uni[cv_splits[[i]]$train,]
+  results_list <- lapply(colnames(concat_integrated_df), 
+                       function(x) fit_glm(x,unisub_df,
+                                           tested_variable = "UPF_perc_avg"))
+  results_df <- do.call(rbind, results_list)
+  
+  results_df$p_adjusted <- p.adjust(results_df$Pr...t..,method = "BH")
+
+  vars <- results_df$metabolite[results_df$p_adjusted<0.05 & results_df$variable=="UPF_perc_avg"]
+  vars_selection[[i]] <- vars
+  
+  # Wrap all variable names in backticks
+  vars_safe <- paste0("`", vars, "`")
+  
+  fml <- as.formula(paste("UPF_perc_avg ~", paste(vars_safe, collapse = " + ")))
+  
   # fit the model
-  model <- lm(fml, data = concat_for_uni[cv_splits[[i]]$train,])
+  model <- lm(fml, unisub_df)
+  
   # predict the result on validation dataset
   VG_index <- stats::predict(model,concat_for_uni[cv_splits[[i]]$val,])
   
@@ -1025,15 +1037,16 @@ for (i in 1:length(cv_splits)){
 
   # plot the result
   p <- ggplot(sub_df, 
-              aes_string(x = "VGindex", y = "UPF_perc_avg")) +
+              aes_string(x = "VGindex", y = "UPF_perc_avg"),
+              color="blue") +
        geom_point() + 
-    geom_smooth(method = "lm",color="blue") + 
+    geom_smooth(method = "lm") + 
     theme_minimal() + 
     ggtitle(paste("Rho =",round(cor_val,2)))
 
   plot_list[[i]] <- p
   rhos[i] <- round(cor_val,2)
-  
+  ps[i] <- cor_test$p.value
 }
 
 ```
@@ -1044,6 +1057,13 @@ wrap_plots(plot_list)
 
 ```{r}
 mean(rhos)
+```
+
+```{r}
+# Fisher's method to combine p-values
+library(metap)
+combined_p <- sumlog(ps)$p
+combined_p
 ```
 
 ```{r}
@@ -1060,11 +1080,20 @@ mean(rhos)
        geom_point() + 
     geom_smooth(method = "lm",color="blue") + 
     theme_minimal() + 
+      theme(panel.border = 
+              element_rect(color = "black", fill = NA, size = 0),
+            panel.grid = element_blank(),
+            axis.ticks.x = 
+              element_line(size=0.3,color = "black"),
+            axis.ticks.y = 
+              element_line(size=0.3,color="black"),
+            axis.ticks.length = unit(4,"pt"),
+            axis.text=element_text(face="bold",size=12),
+            axis.title = element_text(face="bold",size=15)) + 
     ggtitle(paste("Rho =",round(cor_val,2))) + 
     xlab("Metabolite-based UPF") + 
     ylab("UPF (z-scored)")
   
-p <- ggtheme(p)
 ```
 
 ```{r,fig.height=4,fig.width=5}
@@ -1218,7 +1247,7 @@ p
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/final_significance.pdf",height = 5,width = 7)
+pdf("../results/vegan/Q4_UPF/final_significance.pdf",height = 5,width = 7)
 p
 dev.off()
 ```
@@ -1230,7 +1259,7 @@ p_pairwise_heatmap
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF//final_significance_pairwise.pdf",height = 8,width = 5)
+pdf("../results/vegan/Q4_UPF//final_significance_pairwise.pdf",height = 8,width = 5)
 p_pairwise_heatmap
 dev.off()
 ```
@@ -1243,7 +1272,7 @@ UPF_colors <- c("1st_UPFtertile"="#D73027",
                "2nd_UPFtertile"="orange",
                "3rd_UPFtertile"="#1A9850")
 
-# Optional: order metabolites by mean effect size
+# order metabolites by mean effect size
 forest_df <- upf_effects %>%
   group_by(metabolite) %>%
   mutate(mean_eff = mean(emmean)) %>%
@@ -1284,7 +1313,7 @@ p_forest
 ```
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF/final_significance_forest.pdf",height = 15,width = 6)
+pdf("../results/vegan/Q4_UPF/final_significance_forest.pdf",height = 15,width = 6)
 p_forest
 dev.off()
 ```
@@ -1297,7 +1326,7 @@ p_all
 
 
 ```{r,echo=FALSE}
-pdf("../results/vegan/Q3b_UPF//final_significance_networks.pdf",height = 6,width = 11)
+pdf("../results/vegan/Q4_UPF//final_significance_networks.pdf",height = 6,width = 11)
 p_all
 dev.off()
 ```

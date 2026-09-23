@@ -1,9 +1,9 @@
 # VEGANScreener: metabolomics evaluation
 
 <div style="font-size: larger;">
-Petra Polakovicova<sup>1,2,3†</sup>, Anna Ouradova<sup>4†</sup>, Doris Janousova<sup>3,5</sup>, Dominika Sindelarova<sup>3,6</sup>,
-Helena Pelantova<sup>3</sup>, Selma Kronsteiner-Gicevic<sup>7</sup>, Jan Gojda<sup>4†</sup>, Marek Kuzma<sup>3†</sup>, Markus Keller<sup>8†</sup>,
-Leonie H. Bog<sup>l9†</sup>, Isabelle Herter-Aeberli<sup>10†</sup>, Stefaan De Henauw<sup>11†</sup>, Maira Bes-Rastrollo<sup>12,13,14,15†</sup>, Eva S. Schernhammer<sup>7,16†</sup>, Monika Cahova<sup>1†</sup>
+Petra Polakovicova<sup>1,2,3†*</sup>, Anna Ouradova<sup>4†</sup>, Doris Janousova<sup>3,5</sup>, Dominika Sindelarova<sup>3,6</sup>,
+Helena Pelantova<sup>3</sup>, Tooba Asif<sup>7</sup>, Estefanía Dieguez<sup>7</sup>, Vanessa Bullón-Vela<sup>8,9,10</sup>, Ainara Martínez-Tabar<sup>8,9,10</sup>, Cristina Razquin<sup>8,10,11</sup>, Joelina Dietrich<sup>12</sup>, Sandra Müller<sup>12</sup>, Selma Kronsteiner-Gicevic<sup>13</sup>,Jan Gojda<sup>4†</sup>, Marek Kuzma<sup>3†</sup>, Markus Keller<sup>12†</sup>, Leonie H. Bogl<sup>14†</sup>, Isabelle Herter-Aeberli<sup>15†</sup>,
+Stefaan De Henauw<sup>7†</sup>, Maira Bes-Rastrollo<sup>8,9,10,11†</sup>, Eva S. Schernhammer<sup>13,16†</sup>, Monika Cahova<sup>1†</sup>
 
 </div>
 
@@ -11,22 +11,22 @@ Leonie H. Bog<sup>l9†</sup>, Isabelle Herter-Aeberli<sup>10†</sup>, Stefaan 
 
 <sup>†</sup> These authors have contributed equally to this work and share first/last authorship 
 
-<sup>1</sup> Institute for Clinical and Experimental Medicine, Department of Hepatogastroenterology, Prague, CR, Czech Republic  
-<sup>2</sup> Faculty of Science, Charles University, Prague, Czech Republic  
-<sup>3</sup> Institute of Microbiology, The Czech Academy of Sciences, Prague, Czech Republic  
-<sup>4</sup> Department of Internal Medicine, University Hospital Kralovske Vinohrady, Third Faculty of Medicine, Charles University, Prague, Czech Republic  
-<sup>5</sup> Faculty of Food and Biochemical Technology, University of Chemistry and Technology, Prague, Czech Republic  
-<sup>6</sup> Faculty of Chemical Technology, University of Chemistry and Technology, Prague, Czech Republic  
-<sup>7</sup> Department of Epidemiology, Center for Public Health, Medical University of Vienna, Vienna, Austria  
-<sup>8</sup> Research Institute for Plant-Based Nutrition, Giessen, Germany  
-<sup>9</sup> Department of Health Professions, Division of Nutrition and Dietetics, Bern University of Applied Sciences, Bern, Switzerland  
-<sup>10</sup> Laboratory of Nutrition and Metabolic Epigenetics, Institute of Food, Nutrition and Health, ETH Zürich, Zürich, Switzerland  
-<sup>11</sup> Department of Public Health and Primary Care, Faculty of Medicine and Health Sciences, Ghent University, Ghent, Belgium  
-<sup>12</sup> Department of Preventive Medicine and Public Health, University of Navarra, Pamplona, Spain  	
-<sup>13</sup> Institute for Nutrition and Health (INS), University of Navarra, Pamplona, Spain  
-<sup>14</sup> Navarra Health Research Institute (IdiSNA), Pamplona, Spain  
-<sup>15</sup> CIBERobn, Instituto de Salud Carlos III, Madrid, Spain  
-<sup>16</sup> Department of Epidemiology, Harvard T.H. Chan School of Public Health, Boston, MA, USA  
+<sup>1</sup>Experimental Medicine Centre, Institute for Clinical and Experimental Medicine, Prague, Czech Republic
+<sup>2</sup>Faculty of Science, Charles University, Prague, Czech Republic
+<sup>3</sup>Institute of Microbiology, The Czech Academy of Sciences, Prague, Czech Republic
+<sup>4</sup>Department of Internal Medicine, University Hospital Kralovske Vinohrady, Third Faculty of Medicine, Charles University, Prague, Czech Republic
+<sup>5</sup>Faculty of Food and Biochemical Technology, University of Chemistry and Technology, Prague, Czech Republic
+<sup>6</sup>Faculty of Chemical Technology, University of Chemistry and Technology, Prague, Czech Republic
+<sup>7</sup>Department of Public Health and Primary Care, Faculty of Medicine and Health Sciences, Ghent University, Ghent, Belgium
+<sup>8</sup>Department of Preventive Medicine and Public Health, University of Navarra, Pamplona, Spain
+<sup>9</sup>Institute for Nutrition and Health (INS), University of Navarra, Pamplona, Spain 
+<sup>10</sup>Navarra Health Research Institute (IdiSNA), Pamplona, Spain
+<sup>11</sup>CIBERobn, Instituto de Salud Carlos III, Madrid, Spain
+<sup>12</sup>Research Institute for Plant-Based Nutrition, Giessen, Germany
+<sup>13</sup>Department of Epidemiology, Center for Public Health, Medical University of Vienna, Vienna, Austria
+<sup>14</sup>Department of Health Professions, Division of Nutrition and Dietetics, Bern University of Applied Sciences, Bern, Switzerland
+<sup>15</sup>Laboratory of Nutrition and Metabolic Epigenetics, Institute of Food, Nutrition and Health, ETH Zürich, Zürich, Switzerland
+<sup>16</sup>Department of Epidemiology, Harvard T.H. Chan School of Public Health, Boston, MA, USA
 
 ---------------------------------------------------------------------------------------------------
 
